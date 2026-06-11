@@ -1,0 +1,113 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-rine"
+description = "Native LangChain / LangGraph tools for the Rine network — send, receive, discover, and run E2E-encrypted agent-to-agent conversations and groups from a LangChain / LangGraph agent"
+readme = "README.md"
+license = "EUPL-1.2"
+requires-python = ">=3.11"
+authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
+keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
+# Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
+# "langchain-rine"), so the installed metadata (this literal) is the only version string.
+version = "0.3.0"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+    "Topic :: Security :: Cryptography",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Dev/CI consume the LOCAL ./rine-sdk (editable path dep injected inside the rig via the
+    # `--override rine @ file:///work/rine-sdk` — see compose.langchain.yml + Dockerfile +
+    # entrypoint.sh). That editable SDK carries any unreleased Phase-0 fixes. The published
+    # floor below is the *intended* runtime pin (D12); until a release ships it, the rig
+    # installs ./rine-sdk over this entry. The published pin is documented, not active in dev.
+    "rine>=0.2.2",  # PUBLISHED FLOOR (intended) — matches the installed SDK (0.2.2).
+    "langchain-core>=1.0,<2.0",  # exact min verified in Phase 0 (P0-1)
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://rine.network"
+Documentation = "https://docs.rine.network"
+Repository = "https://codeberg.org/rine/langchain-rine"
+Issues = "https://codeberg.org/rine/langchain-rine/issues"
+
+[project.optional-dependencies]
+# v0.2 Tier-3 idle-wake resumer (D17). LangGraph is NOT a core runtime dep — attaching the
+# 11 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
+# the opt-in; this extra supplies langgraph + the durable sqlite checkpointer the resumer's
+# caller-owned `SqliteSaver` lifecycle needs. (The resumer's own thread-map uses stdlib sqlite3.)
+inbound = [
+    "langgraph>=1.2,<2.0",                 # resolved 1.2.4 — interrupt()/Command + Agent-Inbox schema
+    "langgraph-checkpoint-sqlite>=3.0,<4", # resolved 3.1.0 — SqliteSaver/AsyncSqliteSaver (durable)
+    "aiosqlite>=0.20",                     # resolved 0.22.1 — async SqliteThreadMap store (D21)
+]
+# Pins resolved + verified by Phase-0-verify inside the rig (SPEC §5 P0-1/P0-4, §18 / PHASE0_CONTRACT.md).
+# Resolved set (2026-06-11): langchain-core 1.4.4 · langchain 1.3.7 · langchain-tests 1.1.9 ·
+# langgraph 1.2.4 · langchain-openai 1.3.0 · pydantic 2.13.4 · pytest 9.0.3 · pytest-asyncio 1.4.0.
+dev = [
+    "pytest>=8.0",            # langchain-tests forces >=9.0.3 transitively; resolved 9.0.3
+    "respx>=0.22",            # resolved 0.23.1
+    # `langchain` meta-pkg provides langchain.agents.create_agent (P0-1). It is NOT pulled
+    # transitively by langchain-tests / langgraph / langchain-openai — it MUST be explicit.
+    "langchain>=1.0,<2.0",
+    "langchain-tests==1.1.9", # pinned EXACTLY (SPEC §13/§15 conformance claim); brings pytest 9.x + pytest-asyncio 1.x + pytest-socket
+    "langgraph>=1.2,<2.0",    # resolved 1.2.4
+    "langgraph-checkpoint-sqlite>=3.0,<4",  # resolved 3.1.0 — durable SqliteSaver for the Tier-3 resumer tests (v0.2)
+    "aiosqlite>=0.20",        # resolved 0.22.1 — async SqliteThreadMap store tests (v0.3, D21)
+    "langchain-openai>=1.0,<2.0",  # resolved 1.3.0 (e2e live-LLM agent)
+    "ruff>=0.8",              # resolved 0.15.16
+    "mypy>=1.13",             # resolved 2.1.0 (mypy 2.x — see PHASE0_CONTRACT spec-amendments)
+]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["phases/", "e2e/", "tests/", "examples/"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langchain_rine"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# REQUIRED (Phase-0 P0-4): the langchain-tests ToolsIntegrationTests base class ships
+# `async def test_async_invoke_*` cases. Without auto asyncio mode they ERROR with
+# "async def functions are not natively supported". pytest-asyncio arrives via langchain-tests.
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "UP", "B", "SIM", "TCH",
+    "D101", "D102", "D103", "D107", "D205", "D400",
+]
+ignore = ["D100"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test classes/methods carry self-documenting `test_<what>_<when>_<expected>`
+# names; per-symbol docstrings would be noise. Module + most method docstrings
+# are still written by hand, but the rule is not enforced here.
+"tests/**" = ["D101", "D102", "D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+packages = ["langchain_rine"]
+mypy_path = "src"

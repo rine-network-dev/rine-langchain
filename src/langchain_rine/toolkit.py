@@ -1,0 +1,104 @@
+"""``RineToolkit`` — a curated set of rine tools sharing one client (SPEC §7).
+
+A ``langchain_core.tools.BaseToolkit`` that builds the requested subset of the 11
+tools (via ``include``) and injects ONE lazily-built ``SyncRineClient`` into every
+returned tool (AC-11: a single ``build_client`` call per toolkit instance). The
+``config_dir``/``api_url``/``agent`` overrides propagate to each tool so they all
+resolve credentials/keys from the same place.
+
+Import is side-effect-free (invariant I-1): the shared client is built inside
+``get_tools()``, never at import or construction. Individual tool classes stay
+exported from ``langchain_rine`` for the "attach only what you need" opt-in.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
+
+from langchain_core.tools import BaseTool, BaseToolkit
+from pydantic import Field, PrivateAttr
+
+from langchain_rine._client import build_client
+from langchain_rine.tools import (
+    RineCheckInboxTool,
+    RineDiscoverTool,
+    RineGroupCreateTool,
+    RineGroupInspectTool,
+    RineGroupInviteTool,
+    RineGroupRemoveTool,
+    RineInspectTool,
+    RineReadTool,
+    RineReplyTool,
+    RineSendAndWaitTool,
+    RineSendTool,
+)
+
+if TYPE_CHECKING:
+    from rine import SyncRineClient
+
+_MESSAGING = (RineSendTool, RineSendAndWaitTool, RineCheckInboxTool, RineReadTool, RineReplyTool)
+_DISCOVERY = (RineDiscoverTool, RineInspectTool)
+_GROUPS = (RineGroupCreateTool, RineGroupInviteTool, RineGroupRemoveTool, RineGroupInspectTool)
+_DOMAINS = {"messaging": _MESSAGING, "discovery": _DISCOVERY, "groups": _GROUPS}
+
+
+class RineToolkit(BaseToolkit):
+    """Curated subset of rine tools sharing one lazily-built client (SPEC §7).
+
+    ``rich_returns`` is RESERVED for v0.2 and currently has NO effect: tools always
+    return plain strings. The structured ``content_and_artifact`` return it will gate
+    stays unwired while langchain#29874 is live on the pinned ``langchain-core`` (D5/D6,
+    PHASE0_CONTRACT §9) — a ``content_and_artifact`` tool invoked with an ``id=None``
+    ToolCall silently drops the artifact, so the string-return default is the only
+    conformance-safe behaviour for now. The field is kept for forward API stability.
+    """
+
+    config_dir: str | None = None
+    api_url: str | None = None
+    agent: str | None = None
+    include: Literal["messaging", "discovery", "groups", "all"] | list[str] = "all"
+    rich_returns: bool = Field(
+        default=False,
+        description=(
+            "RESERVED for v0.2 — currently INERT (no effect). Tools always return plain "
+            "strings; the structured content_and_artifact return is gated until "
+            "langchain#29874 is resolved on the pinned langchain-core (D5/D6). Setting "
+            "True does not change behaviour today."
+        ),
+    )
+    _client: SyncRineClient | None = PrivateAttr(default=None)
+
+    def get_tools(self) -> list[BaseTool]:
+        """Build the curated tool subset, all sharing one client (AC-10/11).
+
+        ``include="all"`` returns all 11; a single domain name returns that domain's
+        tools; a list returns the union of the named domains. Every tool receives the
+        toolkit's overrides plus the single shared ``SyncRineClient`` (one
+        ``build_client`` call across the whole toolkit). ``rich_returns`` stays UNWIRED
+        in v0.1 (D5/D6 string-return default; langchain#29874 still live).
+        """
+        if self.include == "all":
+            classes = [c for group in _DOMAINS.values() for c in group]
+        else:
+            names = [self.include] if isinstance(self.include, str) else self.include
+            classes = [c for n in names for c in _DOMAINS[n]]
+        shared = self._shared_client()
+        tools: list[BaseTool] = []
+        for cls in classes:
+            tool = cls(config_dir=self.config_dir, api_url=self.api_url, agent=self.agent)
+            tool._client = shared  # AC-11: one build_client shared by every tool
+            tools.append(tool)
+        return tools
+
+    def _shared_client(self) -> SyncRineClient:
+        """Build (once) the client every tool from this toolkit shares (AC-11)."""
+        if self._client is None:
+            self._client = build_client(
+                config_dir=self.config_dir, api_url=self.api_url, agent=self.agent
+            )
+        return self._client
+
+
+def get_tools(**kwargs: object) -> list[BaseTool]:
+    """Module-level convenience: ``RineToolkit(**kwargs).get_tools()``."""
+    return RineToolkit(**kwargs).get_tools()  # type: ignore[arg-type]

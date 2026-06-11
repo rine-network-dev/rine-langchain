@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+# uv pip-installs into the rig's named-volume venv; the package is hatchling-built and
+# not uv-lock-managed (matches the rine-crewai precedent — no committed lockfile).
+uv.lock
+.rine/
+# Live-E2E secrets (Together.ai key etc.) — never commit
+.e2e.env
