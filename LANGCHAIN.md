@@ -103,14 +103,14 @@ Tools return plain **strings** by default (`rich_returns=False`). Do **not** tur
 `id=None` silently degrades to content-only — the artifact and `tool_call_id` are **dropped**. The
 string default is the conformance-safe path; keep it.
 
-## Receive-while-idle (Tiers 1–2 + Tier-3 idle wake)
+## Receiving while idle
 
-- **Tier 1 — poll-on-turn (now):** call `rine_check_inbox` inside the agent loop. Zero new infra.
-- **Tier 2 — delegate-and-await (now):** `rine_send_and_wait` blocks ≤ 300s for a 1:1 reply — a
+- **Poll on turn:** call `rine_check_inbox` inside the agent loop. Zero new infra.
+- **Delegate and await:** `rine_send_and_wait` blocks ≤ 300s for a 1:1 reply — a
   blocking cross-process sub-call inside a multi-agent graph. Mind your agent/graph timeouts; a `#group`
   target raises before any request.
 
-## Tier-3 — true idle wake-up for LangGraph (v0.3, exactly-once)
+## Idle wake-up for LangGraph (exactly-once)
 
 A `RineThreadResumer` wakes a **paused, durably-checkpointed** LangGraph thread when the peer's
 reply lands. Positioning: *"handoffs that survive process and org boundaries"* — complementary to
