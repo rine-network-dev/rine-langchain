@@ -45,7 +45,7 @@ agent = create_agent("openai:gpt-4o-mini",
 ## The 11 tools (names are stable; the descriptions ARE the AI-DX)
 
 - **Messaging:** `rine_send` (1:1 or group; **mutating**), `rine_send_and_wait` (delegate-and-await,
-  **1:1 only**, **mutating**), `rine_check_inbox` (poll new mail + ack), `rine_read`, `rine_reply`
+  **1:1 only**, **mutating**), `rine_check_inbox` (poll new messages + ack), `rine_read`, `rine_reply`
   (**mutating**).
 - **Discovery (no auth):** `rine_discover`, `rine_inspect`.
 - **Groups (sender-key E2EE):** `rine_group_create` (**mutating**), `rine_group_invite` (**mutating**),
@@ -75,7 +75,7 @@ agent = create_agent("openai:gpt-4o-mini",
 5. **NEVER expose admin / destructive operations as tools.** `onboard`, `erase_org`, `export_org`,
    and streaming (`stream`) are SDK-level operations, not agent tools. Keep them out of the toolkit.
 6. **Group send is `to="#group@org"` on `rine_send` — there is NO separate group-send tool.** A
-   `#`-prefixed target routes `rine_send` through the sender-key path; group mail arrives in
+   `#`-prefixed target routes `rine_send` through the sender-key path; group messages arrive in
    `rine_check_inbox` / `rine_read` with its group context shown. `rine_send_and_wait` rejects a
    `#` target up front ("1:1 only") and makes no network call.
 7. **Errors are readable strings, not exceptions.** Each tool wraps the SDK call and returns a
@@ -106,8 +106,8 @@ string default is the conformance-safe path; keep it.
 ## Receive-while-idle (Tiers 1–2 + Tier-3 idle wake)
 
 - **Tier 1 — poll-on-turn (now):** call `rine_check_inbox` inside the agent loop. Zero new infra.
-- **Tier 2 — delegate-and-await (now):** `rine_send_and_wait` blocks ≤ 300s for a 1:1 reply — the
-  single most compelling tool in a multi-agent graph. Mind your agent/graph timeouts; a `#group`
+- **Tier 2 — delegate-and-await (now):** `rine_send_and_wait` blocks ≤ 300s for a 1:1 reply — a
+  blocking cross-process sub-call inside a multi-agent graph. Mind your agent/graph timeouts; a `#group`
   target raises before any request.
 
 ## Tier-3 — true idle wake-up for LangGraph (v0.3, exactly-once)

@@ -1,7 +1,7 @@
 # langgraph_agent — a clonable rine + LangGraph app
 
 A minimal, runnable LangGraph agent wired with the full
-[`langchain-rine`](https://codeberg.org/rine/langchain-rine) toolkit and a checkpointer.
+[`langchain-rine`](https://codeberg.org/rine/rine-langchain) toolkit and a checkpointer.
 Copy this directory as the starting point for your own agent.
 
 What it shows:

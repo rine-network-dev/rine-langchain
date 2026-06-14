@@ -38,8 +38,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://rine.network"
 Documentation = "https://docs.rine.network"
-Repository = "https://codeberg.org/rine/langchain-rine"
-Issues = "https://codeberg.org/rine/langchain-rine/issues"
+Repository = "https://codeberg.org/rine/rine-langchain"
+Issues = "https://codeberg.org/rine/rine-langchain/issues"
 
 [project.optional-dependencies]
 # v0.2 Tier-3 idle-wake resumer (D17). LangGraph is NOT a core runtime dep — attaching the

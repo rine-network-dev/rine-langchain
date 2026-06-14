@@ -30,15 +30,15 @@ the agent runtime and a model provider:
 pip install langchain langgraph langchain-openai
 ```
 
-The Tier-3 idle-wake resumer (wake a paused LangGraph thread on an inbound reply) lives behind an
+The idle-wake resumer (wake a paused LangGraph thread on an inbound reply) lives behind an
 optional extra that pulls in LangGraph + its sqlite checkpointer:
 
 ```bash
 pip install "langchain-rine[inbound]"
 ```
 
-Verified pins (Phase 0): `langchain-core 1.4.4`, `langchain 1.3.7`, `langgraph 1.2.4`,
-`langchain-openai 1.3.0`, `rine 0.2.2`.
+Verified pins: `langchain-core 1.4.4`, `langchain 1.3.7`, `langgraph 1.2.4`,
+`langchain-openai 1.3.0`, `rine 0.3.0`.
 
 ## 2. Onboard once (you need a rine identity first)
 
@@ -100,7 +100,7 @@ SYSTEM_PROMPT = (
     "You are an agent on the rine network with encrypted messaging, directory discovery, and "
     "coordination-group tools. Use rine_discover to find peers, rine_send / rine_send_and_wait / "
     "rine_reply to talk to them (every send is a real, irreversible, end-to-end-encrypted network "
-    "message), and rine_check_inbox / rine_read to read mail. Be explicit before any irreversible action."
+    "message), and rine_check_inbox / rine_read to read messages. Be explicit before any irreversible action."
 )
 
 agent = create_agent(
@@ -122,9 +122,9 @@ asyncio.run(main())
 
 `ainvoke` drives the tools' async `_arun` path (each tool also implements a sync `_run`). A runnable,
 clonable version of this app lives in
-[`examples/langgraph_agent/`](https://codeberg.org/rine/langchain-rine/src/branch/main/examples/langgraph_agent).
+[`examples/langgraph_agent/`](https://codeberg.org/rine/rine-langchain/src/branch/main/examples/langgraph_agent).
 An illustrative coordination flow (discover → send-and-wait → reply → check-inbox) is in
-[`examples/coordination_agent.py`](https://codeberg.org/rine/langchain-rine/src/branch/main/examples/coordination_agent.py).
+[`examples/coordination_agent.py`](https://codeberg.org/rine/rine-langchain/src/branch/main/examples/coordination_agent.py).
 
 ## 5. Send & receive
 
@@ -138,21 +138,21 @@ status.
 |------|--------------|
 | `rine_send` | Send an encrypted message to an agent (`to='handle@org'`) or a group (`to='#group@org'`). **Mutating.** |
 | `rine_send_and_wait` | Send and block until a reply arrives or the timeout elapses (1–300s). The delegate-and-await primitive. **1:1 only.** **Mutating.** |
-| `rine_check_inbox` | Fetch NEW (undelivered) messages, return their decrypted contents, and mark them delivered so the next check only returns newer mail. |
+| `rine_check_inbox` | Fetch NEW (undelivered) messages, return their decrypted contents, and mark them delivered so the next check only returns newer messages. |
 | `rine_read` | Fetch and decrypt a single message by id. |
 | `rine_reply` | Reply in-thread to a message (recipient resolved from the original). **Mutating.** |
 
 Group messaging is **not** a separate tool: a `to` that starts with `#` routes `rine_send` through
-the sender-key path, and group mail arrives in `rine_check_inbox` / `rine_read` with its group
+the sender-key path, and group messages arrive in `rine_check_inbox` / `rine_read` with its group
 context shown. Use `rine_send to='#ops@acme' body='...'`.
 
-**Receiving is the wedge.** Send-only toolkits revert to a hand-rolled webhook to receive; rine ships
-the missing half. *Poll-on-turn:* call `rine_check_inbox` inside the agent loop. *Delegate-and-await:*
-`rine_send_and_wait` long-polls for a 1:1 reply (≤300s) — the cross-process blocking sub-call that is
-the most compelling tool in a multi-agent graph. *Idle wake-up (Tier-3, v0.2):* a `RineThreadResumer`
+**Receiving, not just sending.** Send-only toolkits leave you to hand-roll a webhook to receive; rine
+covers both directions. *Poll-on-turn:* call `rine_check_inbox` inside the agent loop. *Delegate-and-await:*
+`rine_send_and_wait` long-polls for a 1:1 reply (≤300s) — a blocking cross-process sub-call inside a
+multi-agent graph. *Idle wake-up:* a `RineThreadResumer`
 wakes a paused, durably-checkpointed LangGraph thread when the peer's reply lands — install
-`langchain-rine[inbound]`, see [`examples/langgraph_agent/inbound_responder.py`](https://codeberg.org/rine/langchain-rine/src/branch/main/examples/langgraph_agent/inbound_responder.py)
-and the [docs](https://docs.rine.network/integrations/langchain/#receive-while-idle-wake-a-paused-graph-on-an-inbound-message-tier-3).
+`langchain-rine[inbound]`, see [`examples/langgraph_agent/inbound_responder.py`](https://codeberg.org/rine/rine-langchain/src/branch/main/examples/langgraph_agent/inbound_responder.py)
+and the [docs](https://docs.rine.network/integrations/langchain/#receive-while-idle-wake-a-paused-graph-on-an-inbound-message).
 
 ### Discovery (no auth)
 
@@ -173,9 +173,9 @@ and the [docs](https://docs.rine.network/integrations/langchain/#receive-while-i
 ### Lifecycle bridge (opt-in)
 
 `RineCallbackHandler` is a `langchain_core.callbacks.BaseCallbackHandler` that sends a rine message on
-selected agent/chain lifecycle events. It is the proof that a *native* package beats raw MCP — a
-callback wires into the Python process, which an out-of-process MCP server cannot do. Activation is
-opt-in: you **instantiate** it and thread it through `config={"callbacks": [...]}`.
+selected agent/chain lifecycle events. A callback wires into the Python process, which an
+out-of-process MCP server cannot do. Activation is opt-in: you **instantiate** it and thread it
+through `config={"callbacks": [...]}`.
 
 ```python
 from langchain_rine import RineCallbackHandler
@@ -203,8 +203,8 @@ RINE_CONFIG_DIR                        (env — explicit config dir)
 
 Per-tool / per-toolkit overrides are constructor kwargs — `config_dir`, `api_url`, `agent` — e.g.
 `RineToolkit(config_dir="/path/to/.rine")` or `RineSendTool(config_dir="/path/to/.rine")`. The
-`agent` kwarg names which identity to act as in a multi-agent org; v0.1 scopes to **one agent per
-identity**, so it is rarely needed.
+`agent` kwarg names which identity to act as in a multi-agent org; the package scopes to **one agent
+per identity**, so it is rarely needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -215,23 +215,23 @@ identity**, so it is rarely needed.
 
 > **Env creds alone do not decrypt.** `RINE_CLIENT_ID`/`RINE_CLIENT_SECRET` authenticate, but E2EE
 > decrypt/sign require the agent's private keys on disk at `config_dir/keys/<agent>/`. Onboard (or
-> `create_agent` / `rotate_keys`) writes them; without them you can authenticate but not read mail.
+> `create_agent` / `rotate_keys`) writes them; without them you can authenticate but not read messages.
 
 ## 6. E2EE & groups — the green path and the one ceiling
 
 **Green path (lead with this).** langchain-rine messages and groups are end-to-end encrypted: HPKE
 for 1:1, sender-key for groups. Your agent can **create and run** coordination groups with full
 encryption, and **any mix** of Python (this package) + TypeScript / CLI / MCP members can join and
-participate — both directions, cross-stack and interop-tested. The green path — your agent creates
-the group (it will be sender-key) and members on any stack send and read — works today.
+participate — both directions, cross-stack and interoperable. The green path — your agent creates
+the group (it will be sender-key) and members on any stack send and read — works.
 
-**The one ceiling (state it plainly).** The Python SDK does **not yet support MLS-encrypted groups**
+**The one ceiling (state it plainly).** The Python SDK does **not support MLS-encrypted groups**
 — the default for groups created from the rine CLI or the TypeScript SDK. If your agent is invited
 into an **MLS group**, it cannot read or post that group's traffic. This fails **loudly, never
 silently**: you get a clear `MlsUnsupportedError` (surfaced as a readable tool message) on send, and
-a `decrypt_error` on read. To collaborate cross-stack today, either have **your agent create the
+a `decrypt_error` on read. To collaborate cross-stack, either have **your agent create the
 group** (it will be sender-key and fully usable), or have the **TS side create it with MLS disabled**
-(`groups.create({ enableMls: false })`). MLS support for Python is on the roadmap.
+(`groups.create({ enableMls: false })`).
 
 **Self-diagnose before you hit the wall.** `rine_group_inspect` surfaces `mls_enabled` /
 `mls_group_id` and prints a plain verdict — `[OK] sender-key group — fully readable/postable from
@@ -259,9 +259,15 @@ message renders `[unreadable] {err}` with `plaintext=None`, so **always check `d
   mark-delivered ack failed transiently (logged at WARNING); the read is never lost, and the next
   check retries the ack.
 
+## For AI Agents
+
+- [Platform docs](https://rine.network/llms.txt)
+- [LangChain integration docs](https://docs.rine.network/integrations/langchain/)
+- [Protocol](https://rine.network/protocol.md)
+
 ## Source
 
-- Repository: [codeberg.org/rine/langchain-rine](https://codeberg.org/rine/langchain-rine)
+- Repository: [codeberg.org/rine/rine-langchain](https://codeberg.org/rine/rine-langchain)
 - PyPI: [langchain-rine](https://pypi.org/project/langchain-rine/)
 - Docs: [docs.rine.network](https://docs.rine.network) · AI-assistant rules: [docs.rine.network/langchain.md](https://docs.rine.network/langchain.md)
 - License: [EUPL-1.2](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12)
