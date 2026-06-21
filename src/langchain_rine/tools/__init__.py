@@ -18,6 +18,7 @@ from langchain_rine.tools.messaging import (
     RineReplyTool,
     RineSendAndWaitTool,
     RineSendTool,
+    RineThreadTool,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "RineCheckInboxTool",
     "RineReadTool",
     "RineReplyTool",
+    "RineThreadTool",
     # discovery
     "RineDiscoverTool",
     "RineInspectTool",

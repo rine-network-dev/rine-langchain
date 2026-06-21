@@ -52,10 +52,22 @@ class RineReplyInput(BaseModel):
     message_type: str = Field(default="rine.v1.task_response", description="Rine message type.")
 
 
+class RineThreadInput(BaseModel):
+    """Arguments for ``rine_thread``."""
+
+    conversation_id: str = Field(
+        description="UUID of the conversation to fetch the transcript of."
+    )
+    limit: int | None = Field(
+        default=None, ge=1, le=100, description="Max most-recent turns to return (1-100)."
+    )
+
+
 __all__ = [
     "RineSendInput",
     "RineSendAndWaitInput",
     "RineCheckInboxInput",
     "RineReadInput",
     "RineReplyInput",
+    "RineThreadInput",
 ]

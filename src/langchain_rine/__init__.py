@@ -38,6 +38,7 @@ from langchain_rine.tools import (
     RineReplyTool,
     RineSendAndWaitTool,
     RineSendTool,
+    RineThreadTool,
 )
 
 try:
@@ -52,6 +53,7 @@ __all__ = [
     "RineCheckInboxTool",
     "RineReadTool",
     "RineReplyTool",
+    "RineThreadTool",
     # discovery
     "RineDiscoverTool",
     "RineInspectTool",

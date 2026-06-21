@@ -28,6 +28,7 @@ from langchain_rine import (
     RineReplyTool,
     RineSendAndWaitTool,
     RineSendTool,
+    RineThreadTool,
 )
 
 from ..conftest import (
@@ -716,6 +717,147 @@ class TestRineReadTool:
 
         assert "Not found" in out
         assert "message not found" in out
+
+
+# =====================================================================
+# RineThreadTool (REQ-TOOL-01)
+# =====================================================================
+
+
+def _received_row(received_ct):
+    """One ``direction="received"`` peer turn the caller can decrypt."""
+    row = message_payload(
+        encryption_version=EncryptionVersion.HPKE_V1,
+        encrypted_payload=received_ct,
+        from_agent_id=OTHER_AGENT_ID,
+        to_agent_id=AGENT_ID,
+    )
+    row["direction"] = "received"
+    row["sender_handle"] = OTHER_HANDLE
+    return row
+
+
+def _sent_row(self_ct):
+    """One ``direction="sent"`` self turn the caller opens via ``self_encrypted_payload``."""
+    row = message_payload(
+        encryption_version=EncryptionVersion.HPKE_V1,
+        encrypted_payload="ZHVtbXk=",  # peer-sealed copy the sender cannot open
+        from_agent_id=AGENT_ID,
+        to_agent_id=OTHER_AGENT_ID,
+    )
+    row["direction"] = "sent"
+    row["self_encrypted_payload"] = self_ct
+    return row
+
+
+def _unavailable_sent_row():
+    """A ``direction="sent"`` row with no self-blob → renders ``[unavailable]``."""
+    row = message_payload(
+        encryption_version=EncryptionVersion.HPKE_V1,
+        encrypted_payload="ZHVtbXk=",
+        from_agent_id=AGENT_ID,
+        to_agent_id=OTHER_AGENT_ID,
+    )
+    row["direction"] = "sent"
+    return row
+
+
+def _thread_page(received_ct):
+    """A both-sided ``GET /conversations/{id}/messages`` page (one received turn)."""
+    return {"messages": [_received_row(received_ct)], "truncated": False}
+
+
+class TestRineThreadTool:
+    @respx.mock
+    def test_thread_renders_role_tagged_transcript(self, config_dir):
+        """REQ-TOOL-01: rine_thread returns the decrypted, role-tagged transcript."""
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
+            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+        )
+        # A received turn the caller can actually decrypt (sealed to AGENT_ID).
+        received_ct = hpke_self_encrypt(config_dir, {"text": "peer turn one"})
+        respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
+            return_value=httpx.Response(200, json=_thread_page(received_ct))
+        )
+
+        out = RineThreadTool(config_dir=config_dir, api_url=API_URL).invoke(
+            {"conversation_id": CONVERSATION_ID}
+        )
+
+        assert f"[received] {OTHER_HANDLE}: peer turn one" in out
+        assert received_ct not in out  # I-2: ciphertext never surfaces
+
+    @respx.mock
+    async def test_thread_arun_matches_run(self, config_dir):
+        """AC-8: ``.ainvoke`` returns the same transcript as ``.invoke`` (same mock)."""
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
+            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+        )
+        received_ct = hpke_self_encrypt(config_dir, {"text": "peer turn one"})
+        respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
+            return_value=httpx.Response(200, json=_thread_page(received_ct))
+        )
+
+        out = await RineThreadTool(config_dir=config_dir, api_url=API_URL).ainvoke(
+            {"conversation_id": CONVERSATION_ID}
+        )
+
+        assert f"[received] {OTHER_HANDLE}: peer turn one" in out
+        assert received_ct not in out
+
+    @respx.mock
+    def test_thread_empty_conversation_returns_empty_string(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
+            return_value=httpx.Response(200, json={"messages": [], "truncated": False})
+        )
+
+        out = RineThreadTool(config_dir=config_dir, api_url=API_URL).invoke(
+            {"conversation_id": CONVERSATION_ID}
+        )
+
+        assert out == "No messages in this conversation."
+
+    @respx.mock
+    def test_thread_renders_sent_received_and_unavailable_rows(self, config_dir):
+        """REQ-TOOL-01 AC: both-sided transcript renders all row kinds.
+
+        ``[sent] you``, ``[received]``, and an ``[unavailable]`` passthrough all
+        render via ``_render_thread_line``.
+        """
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
+            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+        )
+        sent_ct = hpke_self_encrypt(config_dir, {"text": "my turn one"})
+        received_ct = hpke_self_encrypt(config_dir, {"text": "peer turn one"})
+        page = {
+            "messages": [
+                _sent_row(sent_ct),
+                _received_row(received_ct),
+                _unavailable_sent_row(),
+            ],
+            "truncated": False,
+        }
+        respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
+            return_value=httpx.Response(200, json=page)
+        )
+
+        out = RineThreadTool(config_dir=config_dir, api_url=API_URL).invoke(
+            {"conversation_id": CONVERSATION_ID}
+        )
+
+        assert "[sent] you: my turn one" in out
+        assert f"[received] {OTHER_HANDLE}: peer turn one" in out
+        assert "[sent] you: [unavailable]" in out
+        assert sent_ct not in out  # I-2: ciphertext never surfaces
+        assert received_ct not in out
 
 
 # =====================================================================

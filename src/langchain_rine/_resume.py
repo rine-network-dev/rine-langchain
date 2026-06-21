@@ -34,7 +34,6 @@ from langchain_rine._format import render_message_body
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from langgraph.prebuilt.interrupt import HumanResponse
     from rine import DecryptedMessage
 
     KeyFn = Callable[[DecryptedMessage], tuple[str, str]]
@@ -138,16 +137,28 @@ def pre_state_guard(
     return None, handle, conversation_id
 
 
-def build_human_response(message: DecryptedMessage) -> HumanResponse:
-    """Agent-Inbox ``HumanResponse`` carrying the (verification-annotated) plaintext.
+def build_human_response(message: DecryptedMessage) -> dict[str, Any]:
+    """Agent-Inbox resume payload carrying the (verification-annotated) plaintext + reply ids.
 
     Reuses ``_format.render_message_body`` (the unwrapped plaintext — never the ciphertext, I-2).
     When the sender signature is ``unverifiable`` (D19), the content is prefixed with an
     ``[unverified sender]`` marker so the resumed graph/LLM sees the body is untrusted; a
     ``verified`` message is passed clean. (An ``invalid`` signature never reaches here — the
     resumer skips it via :func:`verification_blocks_resume`.)
+
+    ``args`` is a dict so the graph's reply node can reply IN-PLACE (REQ-FORK-01): it carries
+    ``rine_message_id`` (the inbound id, for ``rine_reply(message_id=…)`` which preserves the
+    conversation instead of forking via ``rine_send``) and ``rine_conversation_id`` alongside the
+    ``text``. Both ids are routing metadata, not ciphertext (I-2 safe). Graph nodes read
+    ``args["text"]`` / ``args["rine_message_id"]``. :meth:`RineThreadResumer.expire` emits the same
+    ``{"text": …}`` shape (without ids — a synthetic note has no real message to reply to).
     """
     body = render_message_body(message)
     if message.verification_status == "unverifiable":
         body = f"[unverified sender] {body}"
-    return {"type": "response", "args": body}
+    args = {
+        "text": body,
+        "rine_message_id": str(message.id),
+        "rine_conversation_id": str(message.conversation_id),
+    }
+    return {"type": "response", "args": args}

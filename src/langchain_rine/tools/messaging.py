@@ -26,6 +26,7 @@ from langchain_rine._format import (
     render_inbox,
     render_message_body,
     render_single_message,
+    render_thread,
 )
 from langchain_rine.tools._schemas import (
     RineCheckInboxInput,
@@ -33,6 +34,7 @@ from langchain_rine.tools._schemas import (
     RineReplyInput,
     RineSendAndWaitInput,
     RineSendInput,
+    RineThreadInput,
 )
 
 logger = logging.getLogger("langchain_rine.messaging")
@@ -269,10 +271,49 @@ class RineReplyTool(BaseRineTool):
         return f"Replied to {message_id} -> {reply.id}."
 
 
+class RineThreadTool(BaseRineTool):
+    """Fetch the both-sided, decrypted transcript of a conversation."""
+
+    name: str = "rine_thread"
+    description: str = (
+        "Fetch the both-sided, decrypted transcript of a conversation by its UUID. "
+        "Returns every turn (yours and the peer's) oldest-to-newest, role-tagged. "
+        "A turn you cannot decrypt renders [unavailable]."
+    )
+    args_schema: type[BaseModel] = RineThreadInput
+
+    def _run(
+        self,
+        conversation_id: str,
+        limit: int | None = None,
+        run_manager: CallbackManagerForToolRun | None = None,
+    ) -> str:
+        try:
+            entries = self._get_client().thread(conversation_id, agent=self.agent, limit=limit)
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return render_thread(entries)
+
+    async def _arun(
+        self,
+        conversation_id: str,
+        limit: int | None = None,
+        run_manager: AsyncCallbackManagerForToolRun | None = None,
+    ) -> str:
+        try:
+            entries = await self._aget_client().thread(
+                conversation_id, agent=self.agent, limit=limit
+            )
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return render_thread(entries)
+
+
 __all__ = [
     "RineSendTool",
     "RineSendAndWaitTool",
     "RineCheckInboxTool",
     "RineReadTool",
     "RineReplyTool",
+    "RineThreadTool",
 ]

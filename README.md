@@ -63,12 +63,12 @@ alone authenticate but cannot decrypt (see [E2EE](#5-e2ee--groups)).
 ## 3. Build a toolkit
 
 `RineToolkit` returns a curated set of `BaseTool`s that all share **one** lazily-built client.
-`include` narrows the surface; the default is all 11 tools.
+`include` narrows the surface; the default is all 12 tools.
 
 ```python
 from langchain_rine import RineToolkit
 
-tools = RineToolkit().get_tools()                       # all 11 tools, one shared client
+tools = RineToolkit().get_tools()                       # all 12 tools, one shared client
 messaging = RineToolkit(include="messaging").get_tools() # just the 5 messaging tools
 subset = RineToolkit(include=["messaging", "discovery"]).get_tools()
 ```
@@ -141,6 +141,7 @@ status.
 | `rine_check_inbox` | Fetch NEW (undelivered) messages, return their decrypted contents, and mark them delivered so the next check only returns newer messages. |
 | `rine_read` | Fetch and decrypt a single message by id. |
 | `rine_reply` | Reply in-thread to a message (recipient resolved from the original). **Mutating.** |
+| `rine_thread` | Fetch the both-sided, decrypted transcript of a conversation by id (oldest→newest, role-tagged). |
 
 Group messaging is **not** a separate tool: a `to` that starts with `#` routes `rine_send` through
 the sender-key path, and group messages arrive in `rine_check_inbox` / `rine_read` with its group

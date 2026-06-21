@@ -20,6 +20,7 @@ from langchain_rine import (
     RineReplyTool,
     RineSendAndWaitTool,
     RineSendTool,
+    RineThreadTool,
     RineToolkit,
 )
 
@@ -31,18 +32,19 @@ _MESSAGING_CLASSES = {
     RineCheckInboxTool,
     RineReadTool,
     RineReplyTool,
+    RineThreadTool,
 }
 _DISCOVERY_CLASSES = {RineDiscoverTool, RineInspectTool}
 
 
 class TestToolkitCuration:
-    def test_default_returns_all_eleven_tools(self):
-        """AC-10: the default toolkit exposes all 11 tools."""
+    def test_default_returns_all_twelve_tools(self):
+        """AC-10: the default toolkit exposes all 12 tools."""
         tools = RineToolkit().get_tools()
-        assert len(tools) == 11
+        assert len(tools) == 12
 
-    def test_include_messaging_returns_exactly_the_five_messaging_tools(self):
-        """AC-10: include='messaging' returns exactly the 5 messaging tools."""
+    def test_include_messaging_returns_exactly_the_messaging_tools(self):
+        """AC-10: include='messaging' returns exactly the messaging tools."""
         tools = RineToolkit(include="messaging").get_tools()
         assert {type(t) for t in tools} == _MESSAGING_CLASSES
 

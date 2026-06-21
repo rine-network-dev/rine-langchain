@@ -10,7 +10,7 @@ and, given an inbound decrypted rine message, resumes the matching paused graph 
 ``_resume.py`` (re-exported here so the public import surface stays stable).
 
 **LangGraph is an OPTIONAL extra (D17).** This module imports langgraph at module level and is
-**not** re-exported from ``langchain_rine/__init__.py``, so ``import langchain_rine`` (the 11
+**not** re-exported from ``langchain_rine/__init__.py``, so ``import langchain_rine`` (the 12
 tools) never needs langgraph. Importing ``langchain_rine.inbound`` IS the opt-in; install it with
 ``pip install langchain-rine[inbound]``.
 
@@ -313,13 +313,15 @@ class RineThreadResumer:
 
         D24. The CALLER owns timing (call this when its own deadline fires); v0.3 adds no
         scheduler. The synthetic ``HumanResponse`` carries only the literal ``note`` (never
-        message content, I-2). Returns ``SKIPPED_NO_THREAD`` / ``SKIPPED_NOT_INTERRUPTED`` if not
-        parked, ``FAILED`` if the resumed node raises, else ``RESUMED``.
+        message content, I-2), in the same ``{"text": …}`` dict shape :func:`build_human_response`
+        emits (no reply ids — a synthetic timeout has no real inbound message to reply to).
+        Returns ``SKIPPED_NO_THREAD`` / ``SKIPPED_NOT_INTERRUPTED`` if not parked, ``FAILED`` if
+        the resumed node raises, else ``RESUMED``.
         """
         thread_id = self._store.get(handle, conversation_id)
         if thread_id is None:
             return ResumeResult(ResumeStatus.SKIPPED_NO_THREAD)
         # message_id=None: a synthetic timeout is never journaled (no real message to dedupe).
         return self._run_resume(
-            thread_id, {"type": "response", "args": note}, handle, conversation_id, None
+            thread_id, {"type": "response", "args": {"text": note}}, handle, conversation_id, None
         )

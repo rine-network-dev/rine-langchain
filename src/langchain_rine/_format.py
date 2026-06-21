@@ -14,7 +14,24 @@ import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rine import AgentProfile, AgentSummary, DecryptedMessage, GroupRead
+    from rine import AgentProfile, AgentSummary, DecryptedMessage, GroupRead, ThreadEntry
+
+
+def _render_thread_line(e: ThreadEntry) -> str:
+    """One thread turn as a role-tagged line: ``[sent] you: …`` / ``[received] h: …``."""
+    who = "you" if e.direction == "sent" else (e.sender_handle or "unknown")
+    return f"[{e.direction}] {who}: {e.text}"
+
+
+def render_thread(entries: list[ThreadEntry]) -> str:
+    """Render a both-sided transcript (oldest→newest) for ``rine_thread``.
+
+    Each turn is a role-tagged line; ``[unavailable]`` text passes through. Mirrors
+    the TS connectors' ``renderThread`` so transcripts read identically.
+    """
+    if not entries:
+        return "No messages in this conversation."
+    return "\n".join(_render_thread_line(e) for e in entries)
 
 
 def _verified_note(msg: DecryptedMessage) -> str:

@@ -22,7 +22,11 @@ from rine import DecryptedMessage
 
 from langchain_rine._threadmap import InMemoryThreadMap
 from langchain_rine.drivers import PollDriver, make_webhook_handler
-from langchain_rine.inbound import ResumeStatus, RineThreadResumer
+from langchain_rine.inbound import (
+    ResumeStatus,
+    RineThreadResumer,
+    build_human_response,
+)
 
 from ..conftest import (
     AGENT_ID,
@@ -49,10 +53,23 @@ class _State(TypedDict):
     reply: str
 
 
+def _resume_text(response: Any) -> str:
+    """Read the plaintext from a resumed HumanResponse the way a real graph node does.
+
+    REQ-FORK-01: ``args`` is now a dict ``{"text", "rine_message_id", "rine_conversation_id"}``
+    (so the node can ``rine_reply(message_id=…)`` in-place). The synthetic ``expire`` note emits
+    the same ``{"text": …}`` shape. A bare-string ``args`` (older/legacy) is tolerated.
+    """
+    args = response.get("args")
+    if isinstance(args, dict):
+        return str(args.get("text", ""))
+    return str(args or "")
+
+
 def _ask_node(state: _State) -> dict[str, Any]:
     """Pause at ``interrupt``; on resume, store the HumanResponse's ``args`` text into state."""
     response = interrupt({"prompt": "awaiting rine reply"})
-    return {"reply": str(response.get("args", ""))}
+    return {"reply": _resume_text(response)}
 
 
 def _single_interrupt_graph(saver: InMemorySaver) -> Any:
@@ -88,7 +105,7 @@ def _two_interrupt_graph(saver: InMemorySaver) -> Any:
 def _rearm_first(state: _State) -> dict[str, Any]:
     """First node: park at an interrupt, store the reply when resumed."""
     response = interrupt({"prompt": "first"})
-    return {"reply": str(response.get("args", ""))}
+    return {"reply": _resume_text(response)}
 
 
 def _rearm_second(state: _State) -> dict[str, Any]:
@@ -119,7 +136,7 @@ def _counting_rearming_graph(saver: InMemorySaver, counter: list[int]) -> Any:
     def _first(state: _State) -> dict[str, Any]:
         response = interrupt({"prompt": "first"})
         counter.append(1)
-        return {"reply": str(response.get("args", ""))}
+        return {"reply": _resume_text(response)}
 
     def _second(state: _State) -> dict[str, Any]:
         interrupt({"prompt": "second"})
@@ -183,6 +200,52 @@ def _message(
         verified=verification_status == "verified",
         verification_status=verification_status,  # type: ignore[arg-type]
     )
+
+
+# =====================================================================
+# build_human_response — reply-in-place payload (REQ-FORK-01)
+# =====================================================================
+
+
+class TestBuildHumanResponse:
+    def test_args_carries_inbound_ids_for_in_place_reply(self):
+        """REQ-FORK-01: resume payload carries the ids for an in-place reply.
+
+        The graph's reply node gets the inbound message + conversation ids so it can
+        ``rine_reply(message_id=…)`` rather than fork a new conversation via ``rine_send``.
+        """
+        resp = build_human_response(_message(plaintext="the answer"))
+        args = resp["args"]
+        assert isinstance(args, dict)
+        assert args["text"] == "the answer"
+        assert args["rine_message_id"] == MESSAGE_ID
+        assert args["rine_conversation_id"] == CONVERSATION_ID
+
+    def test_unverifiable_sender_still_prefixes_text_and_keeps_ids(self):
+        resp = build_human_response(
+            _message(plaintext="maybe real", verification_status="unverifiable")
+        )
+        args = resp["args"]
+        assert isinstance(args, dict)
+        assert args["text"].startswith("[unverified sender]")
+        assert "maybe real" in args["text"]
+        assert args["rine_message_id"] == MESSAGE_ID
+        # I-2: the ciphertext never appears in the resume payload.
+        assert CIPHERTEXT_MARKER not in args["text"]
+
+    def test_req_ctx_02_no_transcript_injected_into_resume_payload(self):
+        """REQ-CTX-02: the resume payload pushes NO rine transcript (no double-context).
+
+        langchain relies on the host LangGraph checkpoint store + the pull tool
+        (``rine_thread``) for cross-turn context — never a pushed transcript. The
+        resume args carry only the current turn's text + threading ids.
+        """
+        resp = build_human_response(_message(plaintext="just this turn"))
+        args = resp["args"]
+        assert set(args) == {"text", "rine_message_id", "rine_conversation_id"}
+        assert "transcript" not in args
+        assert "context" not in args
+        assert "thread" not in args
 
 
 # =====================================================================
