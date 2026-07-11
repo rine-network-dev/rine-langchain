@@ -8,10 +8,13 @@
 # run and never touches the host.
 set -euo pipefail
 
+# Private, non-exported sentinel path. Named `_RIG_INSTALLED` (not `MARKER`) so a test
+# that passes `-e MARKER=…` into the rig is not clobbered: reassigning an already-exported
+# env var here would leak the rig value into the exec'd child process env.
 VENV="${VENV:-/opt/venv}"
-MARKER="$VENV/.rig-installed"
+_RIG_INSTALLED="$VENV/.rig-installed"
 
-if [ ! -f "$MARKER" ]; then
+if [ ! -f "$_RIG_INSTALLED" ]; then
   echo ">>> [rig] bootstrapping venv at $VENV (first run — installs the LangChain tree + deps; slow)"
   # Resolve uv to its absolute path BEFORE clearing the venv. `uv venv --clear` wipes
   # $VENV/bin (which is first on PATH); bash's command-hash would otherwise cache a now
@@ -28,7 +31,7 @@ if [ ! -f "$MARKER" ]; then
     --override /tmp/rig-overrides.txt \
     -e /work/rine-sdk \
     -e "/work/rine-langchain[dev]"
-  touch "$MARKER"
+  touch "$_RIG_INSTALLED"
   echo ">>> [rig] bootstrap complete"
 fi
 
