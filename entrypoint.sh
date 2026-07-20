@@ -15,7 +15,7 @@ VENV="${VENV:-/opt/venv}"
 _RIG_INSTALLED="$VENV/.rig-installed"
 
 if [ ! -f "$_RIG_INSTALLED" ]; then
-  echo ">>> [rig] bootstrapping venv at $VENV (first run — installs the LangChain tree + deps; slow)"
+  echo ">>> [rig] bootstrapping venv at $VENV (first run — installs the LangChain tree + deps; slow)" >&2
   # Resolve uv to its absolute path BEFORE clearing the venv. `uv venv --clear` wipes
   # $VENV/bin (which is first on PATH); bash's command-hash would otherwise cache a now
   # -deleted $VENV/bin/uv and fail the next call ("No such file or directory") on a
@@ -32,7 +32,7 @@ if [ ! -f "$_RIG_INSTALLED" ]; then
     -e /work/rine-sdk \
     -e "/work/rine-langchain[dev]"
   touch "$_RIG_INSTALLED"
-  echo ">>> [rig] bootstrap complete"
+  echo ">>> [rig] bootstrap complete" >&2
 fi
 
 exec "$@"

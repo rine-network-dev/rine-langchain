@@ -20,6 +20,8 @@ from langchain_rine.tools.messaging import (
     RineSendTool,
     RineThreadTool,
 )
+from langchain_rine.tools.payments import RinePayTool
+from langchain_rine.tools.payments_payee import RineFulfillTool
 
 __all__ = [
     # messaging (1:1 + #-prefixed group send/read)
@@ -37,4 +39,7 @@ __all__ = [
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    # x402 payments (pay a quote / fulfil a payment)
+    "RinePayTool",
+    "RineFulfillTool",
 ]

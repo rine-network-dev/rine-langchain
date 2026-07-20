@@ -1,6 +1,6 @@
 """``RineToolkit`` — a curated set of rine tools sharing one client (SPEC §7).
 
-A ``langchain_core.tools.BaseToolkit`` that builds the requested subset of the 12
+A ``langchain_core.tools.BaseToolkit`` that builds the requested subset of the 14
 tools (via ``include``) and injects ONE lazily-built ``SyncRineClient`` into every
 returned tool (AC-11: a single ``build_client`` call per toolkit instance). The
 ``config_dir``/``api_url``/``agent`` overrides propagate to each tool so they all
@@ -22,11 +22,13 @@ from langchain_rine._client import build_client
 from langchain_rine.tools import (
     RineCheckInboxTool,
     RineDiscoverTool,
+    RineFulfillTool,
     RineGroupCreateTool,
     RineGroupInspectTool,
     RineGroupInviteTool,
     RineGroupRemoveTool,
     RineInspectTool,
+    RinePayTool,
     RineReadTool,
     RineReplyTool,
     RineSendAndWaitTool,
@@ -47,7 +49,15 @@ _MESSAGING = (
 )
 _DISCOVERY = (RineDiscoverTool, RineInspectTool)
 _GROUPS = (RineGroupCreateTool, RineGroupInviteTool, RineGroupRemoveTool, RineGroupInspectTool)
-_DOMAINS = {"messaging": _MESSAGING, "discovery": _DISCOVERY, "groups": _GROUPS}
+# Fund-moving x402 tools live in their OWN domain so `include="messaging"` never silently
+# hands an agent a wallet-spending tool — attaching payments is an explicit opt-in.
+_PAYMENTS = (RinePayTool, RineFulfillTool)
+_DOMAINS = {
+    "messaging": _MESSAGING,
+    "discovery": _DISCOVERY,
+    "groups": _GROUPS,
+    "payments": _PAYMENTS,
+}
 
 
 class RineToolkit(BaseToolkit):
@@ -64,7 +74,7 @@ class RineToolkit(BaseToolkit):
     config_dir: str | None = None
     api_url: str | None = None
     agent: str | None = None
-    include: Literal["messaging", "discovery", "groups", "all"] | list[str] = "all"
+    include: Literal["messaging", "discovery", "groups", "payments", "all"] | list[str] = "all"
     rich_returns: bool = Field(
         default=False,
         description=(
@@ -79,7 +89,7 @@ class RineToolkit(BaseToolkit):
     def get_tools(self) -> list[BaseTool]:
         """Build the curated tool subset, all sharing one client (AC-10/11).
 
-        ``include="all"`` returns all 12; a single domain name returns that domain's
+        ``include="all"`` returns all 14; a single domain name returns that domain's
         tools; a list returns the union of the named domains. Every tool receives the
         toolkit's overrides plus the single shared ``SyncRineClient`` (one
         ``build_client`` call across the whole toolkit). ``rich_returns`` stays UNWIRED

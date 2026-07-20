@@ -29,11 +29,13 @@ from langchain_rine.toolkit import RineToolkit
 from langchain_rine.tools import (
     RineCheckInboxTool,
     RineDiscoverTool,
+    RineFulfillTool,
     RineGroupCreateTool,
     RineGroupInspectTool,
     RineGroupInviteTool,
     RineGroupRemoveTool,
     RineInspectTool,
+    RinePayTool,
     RineReadTool,
     RineReplyTool,
     RineSendAndWaitTool,
@@ -62,6 +64,9 @@ __all__ = [
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    # x402 payments
+    "RinePayTool",
+    "RineFulfillTool",
     # toolkit + lifecycle callback
     "RineToolkit",
     "RineCallbackHandler",

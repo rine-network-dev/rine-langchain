@@ -15,7 +15,9 @@ from unittest.mock import patch
 from langchain_rine import (
     RineCheckInboxTool,
     RineDiscoverTool,
+    RineFulfillTool,
     RineInspectTool,
+    RinePayTool,
     RineReadTool,
     RineReplyTool,
     RineSendAndWaitTool,
@@ -35,24 +37,34 @@ _MESSAGING_CLASSES = {
     RineThreadTool,
 }
 _DISCOVERY_CLASSES = {RineDiscoverTool, RineInspectTool}
+_PAYMENTS_CLASSES = {RinePayTool, RineFulfillTool}
 
 
 class TestToolkitCuration:
-    def test_default_returns_all_twelve_tools(self):
-        """AC-10: the default toolkit exposes all 12 tools."""
+    def test_default_returns_all_fourteen_tools(self):
+        """AC-10: the default toolkit exposes all 14 tools (incl. the 2 payment tools)."""
         tools = RineToolkit().get_tools()
-        assert len(tools) == 12
+        assert len(tools) == 14
 
     def test_include_messaging_returns_exactly_the_messaging_tools(self):
-        """AC-10: include='messaging' returns exactly the messaging tools."""
+        """AC-10: include='messaging' returns exactly the messaging tools (no fund tools)."""
         tools = RineToolkit(include="messaging").get_tools()
         assert {type(t) for t in tools} == _MESSAGING_CLASSES
+
+    def test_include_payments_returns_exactly_the_two_payment_tools(self):
+        """AC-10: include='payments' returns exactly rine_pay + rine_fulfill (opt-in domain).
+
+        Fund-moving tools live in their own domain so a messaging-only agent never gets a
+        wallet-spending tool by default.
+        """
+        tools = RineToolkit(include="payments").get_tools()
+        assert {type(t) for t in tools} == _PAYMENTS_CLASSES
 
     def test_include_list_returns_the_union_of_named_domains(self):
         """AC-10: a list value returns the union of the named domains."""
         tools = RineToolkit(include=["messaging", "discovery"]).get_tools()
         assert {type(t) for t in tools} == _MESSAGING_CLASSES | _DISCOVERY_CLASSES
-        # union, no duplicates, no group tools leaked in
+        # union, no duplicates, no group/payment tools leaked in
         assert len(tools) == len(_MESSAGING_CLASSES) + len(_DISCOVERY_CLASSES)
 
 

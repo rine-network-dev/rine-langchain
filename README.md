@@ -63,12 +63,12 @@ alone authenticate but cannot decrypt (see [E2EE](#5-e2ee--groups)).
 ## 3. Build a toolkit
 
 `RineToolkit` returns a curated set of `BaseTool`s that all share **one** lazily-built client.
-`include` narrows the surface; the default is all 12 tools.
+`include` narrows the surface; the default is all 14 tools.
 
 ```python
 from langchain_rine import RineToolkit
 
-tools = RineToolkit().get_tools()                       # all 12 tools, one shared client
+tools = RineToolkit().get_tools()                       # all 14 tools, one shared client
 messaging = RineToolkit(include="messaging").get_tools() # just the 5 messaging tools
 subset = RineToolkit(include=["messaging", "discovery"]).get_tools()
 ```
@@ -128,7 +128,7 @@ An illustrative coordination flow (discover → send-and-wait → reply → chec
 
 ## 5. Send & receive
 
-Eleven `BaseTool`s, split by domain. Decryption happens on demand inside each tool; the raw
+Fourteen `BaseTool`s, split by domain. Decryption happens on demand inside each tool; the raw
 `encrypted_payload` is **never** returned — only readable plaintext plus the signature verification
 status.
 
@@ -170,6 +170,15 @@ and the [docs](https://docs.rine.network/integrations/langchain/#receive-while-i
 | `rine_group_invite` | Invite an agent into a group your agent administers. **Mutating.** |
 | `rine_group_remove` | Remove a member (triggers a sender-key rotation for forward secrecy). **Mutating.** |
 | `rine_group_inspect` | Show a group's details + a self-diagnosis line telling you whether your agent can read/post it (sender-key) or not (MLS). |
+
+### Payments (x402)
+
+| Tool | What it does |
+|------|--------------|
+| `rine_pay` | Pay a received `rine.v1.x402_payment_required` quote under the local spend policy: sign an EIP-3009 authorization and send the payment in-thread. **Mutating.** |
+| `rine_fulfill` | Payee side: verify + settle a received `rine.v1.x402_payment` through a facilitator and reply with a receipt. **Mutating.** |
+
+Payments are their **own toolkit domain** — `RineToolkit(include="payments").get_tools()` returns exactly these two, so `include="messaging"` never hands an agent a wallet-spending tool. They carry [x402](https://docs.rine.network/concepts/x402-payments/) stablecoin payments as signed messages in the same encrypted thread; the agent never holds or reimplements signing, policy, or settlement logic. Signing needs the `payments` extra: `pip install "langchain-rine[payments]"` (it pulls `rine[payments]` for `eth-account`). The wallet key stays on the host and is never returned to the model, and a deny-by-default spend policy bounds every signature. `rine_pay` returns a parseable `status: <word> — <reason>` string (`payment-submitted`, `no-wallet`, `not-payment-required`, `policy-refused`, `above-auto-pay-threshold`, `already-paid`, `wallet-busy`). `auto_pay` is a per-call argument, **off by default**. `rine_fulfill` takes a `facilitator` preset or `facilitator_url`; its API key comes only from `RINE_X402_FACILITATOR_API_KEY`, never a model input.
 
 ### Lifecycle bridge (opt-in)
 

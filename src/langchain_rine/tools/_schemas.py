@@ -8,6 +8,7 @@ the LLM sees when it inspects the tool.
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from rine.x402 import FEATURED_FACILITATOR
 
 
 class RineSendInput(BaseModel):
@@ -63,6 +64,63 @@ class RineThreadInput(BaseModel):
     )
 
 
+class RinePayInput(BaseModel):
+    """Arguments for ``rine_pay``."""
+
+    message_id: str = Field(
+        description="UUID of the received rine.v1.x402_payment_required message to pay."
+    )
+    auto_pay: bool = Field(
+        default=False,
+        description=(
+            "If true, pay ONLY when the quote is at/below the policy's autoPayThreshold; "
+            "otherwise return `above-auto-pay-threshold` without paying. Default false — an "
+            "explicit rine_pay call is the authorization, still bounded by the spend caps."
+        ),
+    )
+    allow_repay: bool = Field(
+        default=False,
+        description=(
+            "If true, re-pay a quote already paid today (a deliberate second, permanent "
+            "debit). Default false — a repeat of the same message_id returns `already-paid`."
+        ),
+    )
+    emit_marker: bool = Field(
+        default=True,
+        description=(
+            "Attach the cleartext status marker (metadata['rine.x402']). Default true. The "
+            "marker carries only coarse lifecycle state — never amounts/assets/addresses."
+        ),
+    )
+
+
+class RineFulfillInput(BaseModel):
+    """Arguments for ``rine_fulfill``."""
+
+    message_id: str = Field(
+        description="UUID of the received rine.v1.x402_payment message to fulfil."
+    )
+    facilitator: str = Field(
+        default=FEATURED_FACILITATOR,
+        description=(
+            "Facilitator preset that verifies+settles the authorization off-rine: `cdp` "
+            "(default), keyless `payai`, or self-hosted `x402-rs`. Ignored when "
+            "facilitator_url is set."
+        ),
+    )
+    facilitator_url: str | None = Field(
+        default=None,
+        description="Explicit facilitator base URL, overriding the preset (e.g. a self-host).",
+    )
+    add_marker: bool = Field(
+        default=True,
+        description=(
+            "Attach the cleartext {status, rail} marker to the receipt. Default true; never "
+            "carries amounts/addresses."
+        ),
+    )
+
+
 __all__ = [
     "RineSendInput",
     "RineSendAndWaitInput",
@@ -70,4 +128,6 @@ __all__ = [
     "RineReadInput",
     "RineReplyInput",
     "RineThreadInput",
+    "RinePayInput",
+    "RineFulfillInput",
 ]
