@@ -1,15 +1,17 @@
-"""Tool classes for langchain-rine, split by domain (SPEC §6).
+"""Tool classes for langchain-rine, split by domain.
 
 Re-exports the ``langchain_core.tools.BaseTool`` subclasses from ``messaging``,
 ``discovery``, and ``groups``. Group send/read are not separate tools — they ride
-``#``-prefix routing through the messaging tools (SPEC §6).
+``#``-prefix routing through the messaging tools.
 """
 
 from langchain_rine.tools.discovery import RineDiscoverTool, RineInspectTool
 from langchain_rine.tools.groups import (
     RineGroupCreateTool,
     RineGroupInspectTool,
+    RineGroupInvitesTool,
     RineGroupInviteTool,
+    RineGroupJoinTool,
     RineGroupRemoveTool,
 )
 from langchain_rine.tools.messaging import (
@@ -34,11 +36,13 @@ __all__ = [
     # discovery
     "RineDiscoverTool",
     "RineInspectTool",
-    # groups (sender-key)
+    # groups
     "RineGroupCreateTool",
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    "RineGroupJoinTool",
+    "RineGroupInvitesTool",
     # x402 payments (pay a quote / fulfil a payment)
     "RinePayTool",
     "RineFulfillTool",

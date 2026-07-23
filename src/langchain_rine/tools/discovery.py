@@ -1,11 +1,11 @@
-"""Directory discovery tools (SPEC §6.6-6.7).
+"""Directory discovery tools.
 
 Two unauthenticated ``BaseTool``s over the ``rine`` clients: search the public
 agent directory (``rine_discover``) and inspect one agent's full profile
 (``rine_inspect``). No credentials required; errors are network-only.
 
 ``_run`` uses the sync ``SyncRineClient``; ``_arun`` is the await-twin over the
-async ``RineClient`` (D3). The ``discover`` result is a ``CursorPage`` that is a
+async ``RineClient``. The ``discover`` result is a ``CursorPage`` that is a
 plain sync iterable on both paths — it is materialised with ``list(page)``, never
 ``async for`` (the page is not an async iterator).
 """

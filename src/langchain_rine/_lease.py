@@ -1,8 +1,8 @@
-"""Advisory single-consumer lease for the Tier-3 poll driver (D22).
+"""Advisory single-consumer lease for the Tier-3 poll driver.
 
 v0.2 *documented* "run exactly one driver per inbox (poll XOR webhook)" but did not enforce it:
 two ``PollDriver``s on one inbox (an accidental 2nd process, or a restarted-not-dead old one)
-both fetch the same ``status="new"`` mail and double-resume (``inv-3``/``idem-3``). This module
+both fetch the same ``status="new"`` mail and double-resume. This module
 turns that rule into an **enforced advisory lease**.
 
 - :class:`Lease` — the protocol the driver depends on (``acquire``/``release``).
@@ -12,7 +12,7 @@ turns that rule into an **enforced advisory lease**.
   this owner; ttl-expiry takeover otherwise). Two drivers coordinate only when they point a
   ``SqliteLease`` at the same db file + ``inbox_key`` (typically the rine agent handle they poll).
 
-Side-effect-free at import (I-1): the connection opens lazily on first :meth:`SqliteLease.acquire`.
+Side-effect-free at import: the connection opens lazily on first :meth:`SqliteLease.acquire`.
 ``time.time()`` + ``uuid`` are runtime-legal (this is library code, not a workflow script).
 """
 
@@ -40,7 +40,7 @@ _SQL_RELEASE_LEASE = "DELETE FROM consumer_lease WHERE inbox_key = ? AND owner_i
 
 @runtime_checkable
 class Lease(Protocol):
-    """An advisory single-consumer lease (D22): one live owner at a time per inbox."""
+    """An advisory single-consumer lease: one live owner at a time per inbox."""
 
     def acquire(self, ttl_seconds: float) -> bool:
         """Grant-or-renew the lease for ``ttl_seconds``; False iff another live owner holds it."""
@@ -52,7 +52,7 @@ class Lease(Protocol):
 
 
 class SqliteLease:
-    """A sqlite-backed advisory :class:`Lease`, co-located with the thread-map db (D22).
+    """A sqlite-backed advisory :class:`Lease`, co-located with the thread-map db.
 
     One ``consumer_lease`` row per ``inbox_key``. ``owner_id`` defaults to a per-instance
     ``uuid4().hex`` so two ``SqliteLease`` objects (typically in different processes) are distinct
@@ -90,7 +90,7 @@ class SqliteLease:
         return self._conn
 
     def acquire(self, ttl_seconds: float) -> bool:
-        """Grant-or-renew the lease; return False iff another *live* owner holds it (D22).
+        """Grant-or-renew the lease; return False iff another *live* owner holds it.
 
         A ``BEGIN IMMEDIATE`` read-modify-write: read the row, then with ``now = time.time()``
         upsert ``(self._owner, now + ttl)`` and return True when there is no row, the row is
@@ -99,7 +99,7 @@ class SqliteLease:
 
         A genuine acquire RACE (another live owner is mid-transaction when this ``BEGIN IMMEDIATE``
         runs) surfaces as ``sqlite3.OperationalError: database is locked`` (after the short
-        ``busy_timeout``). That IS contention, so it degrades to ``False`` (D22's contention →
+        ``busy_timeout``). That IS contention, so it degrades to ``False`` (contention →
         return []), never a propagated raw exception out of the documented ``poll_once`` entry.
         """
         conn = self._connection()

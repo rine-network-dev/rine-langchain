@@ -7,18 +7,18 @@ audit fixes — FAILED status, verification gating, terminal-unregister — push
 - :class:`ResumeStatus` — the typed outcome of handling one inbound message (no
   stringly-typed status anywhere).
 - :class:`ResumeResult` — the per-message result the driver acts on (its
-  :attr:`~ResumeResult.should_ack` property is the v0.3 ack policy — D20).
+  :attr:`~ResumeResult.should_ack` property is the v0.3 ack policy).
 - :func:`default_key_fn` — the ``(handle, conversation_id)`` store-key derivation.
-- :func:`verification_blocks_resume` / :func:`build_human_response` — the ``wh-2`` /
-  D19 / D23 signature-verification gate: a *tampered* (``invalid``) signature must
+- :func:`verification_blocks_resume` / :func:`build_human_response` — the
+  signature-verification gate: a *tampered* (``invalid``) signature must
   never wake a graph; an *unverifiable* one resumes-but-annotated by default, or is
-  *blocked* when the caller opts into ``require_verified`` (D23). Both reuse
-  ``_format`` — never the ciphertext (I-2).
+  *blocked* when the caller opts into ``require_verified``. Both reuse
+  ``_format`` — never the ciphertext.
 - :func:`pre_state_guard` — the **no-I/O** guard chain (decrypt-error → invalid-sig →
   no-conversation) shared verbatim by the sync ``_resolve`` and async ``_aresolve``
-  paths so neither duplicates the guard logic (D21).
+  paths so neither duplicates the guard logic.
 
-Side-effect-free at import (I-1): no network, no client, no langgraph. The
+Side-effect-free at import: no network, no client, no langgraph. The
 re-exports in ``inbound.py`` keep ``from langchain_rine.inbound import
 ResumeStatus, ResumeResult, default_key_fn`` stable.
 """
@@ -58,8 +58,8 @@ class ResumeStatus(enum.Enum):
 # The statuses whose message the driver must mark-delivered (ack). ``RESUMED`` leaves the
 # inbox because it was handled; ``SKIPPED_ALREADY_CONSUMED`` is a redelivery of a message we
 # already resumed (its journal entry proves it) — re-ack it so it finally leaves the inbox
-# without a second resume (D20). Every other status leaves the message ``new`` for a later
-# sweep (D16).
+# without a second resume. Every other status leaves the message ``new`` for a later
+# sweep.
 _ACK_STATUSES = frozenset({ResumeStatus.RESUMED, ResumeStatus.SKIPPED_ALREADY_CONSUMED})
 
 
@@ -69,8 +69,8 @@ class ResumeResult:
 
     ``thread_id`` is the mapped thread (when one was found); ``output`` is the resumed graph's
     return value on a ``RESUMED`` status, else None. The driver acks the
-    :attr:`should_ack` results (``RESUMED`` + ``SKIPPED_ALREADY_CONSUMED`` — D20); every other
-    ``SKIPPED_*`` / ``FAILED`` message stays in the rine inbox for a later sweep (D16).
+    :attr:`should_ack` results (``RESUMED`` + ``SKIPPED_ALREADY_CONSUMED``); every other
+    ``SKIPPED_*`` / ``FAILED`` message stays in the rine inbox for a later sweep.
     """
 
     status: ResumeStatus
@@ -79,7 +79,7 @@ class ResumeResult:
 
     @property
     def should_ack(self) -> bool:
-        """True iff the driver should mark this message delivered (D20 ack policy)."""
+        """True iff the driver should mark this message delivered (ack policy)."""
         return self.status in _ACK_STATUSES
 
 
@@ -102,9 +102,9 @@ def verification_blocks_resume(
 ) -> bool:
     """Return True iff the signature blocks the resume (never wakes the graph).
 
-    The ``wh-2`` / D19 / D23 gate. ``invalid`` (tampered/forged) is **always** blocked — a
+    The signature-verification gate. ``invalid`` (tampered/forged) is **always** blocked — a
     tampered signature must never wake an autonomous graph. ``unverifiable`` (sender key
-    unfetchable) is blocked **only when ``require_verified`` is True** (D23: a strict deployment
+    unfetchable) is blocked **only when ``require_verified`` is True** (a strict deployment
     skips it as ``SKIPPED_UNVERIFIED`` rather than annotate-and-resume); otherwise it is allowed
     through and :func:`build_human_response` annotates it. ``verified`` is always allowed.
     """
@@ -116,7 +116,7 @@ def verification_blocks_resume(
 def pre_state_guard(
     message: DecryptedMessage, key_fn: KeyFn, *, require_verified: bool = False
 ) -> tuple[ResumeResult, str, str] | tuple[None, str, str]:
-    """Run the **no-I/O** inbound guards shared by the sync + async resume paths (D21).
+    """Run the **no-I/O** inbound guards shared by the sync + async resume paths.
 
     Returns ``(early, handle, conversation_id)``. A non-None ``early`` is a terminal
     :class:`ResumeResult` to return directly (decrypt-error / blocked-signature /
@@ -124,7 +124,7 @@ def pre_state_guard(
     (already-consumed, thread lookup) with the derived ``handle`` / ``conversation_id``.
 
     Factored here so ``_resolve`` and ``_aresolve`` do not duplicate the guard chain — each
-    only adds its own (sync vs awaited) store lookups (D21). No store / network / langgraph
+    only adds its own (sync vs awaited) store lookups. No store / network / langgraph
     touch happens here; logging is left to the caller so the message text can name the path.
     """
     if message.decrypt_error:
@@ -140,16 +140,16 @@ def pre_state_guard(
 def build_human_response(message: DecryptedMessage) -> dict[str, Any]:
     """Agent-Inbox resume payload carrying the (verification-annotated) plaintext + reply ids.
 
-    Reuses ``_format.render_message_body`` (the unwrapped plaintext — never the ciphertext, I-2).
-    When the sender signature is ``unverifiable`` (D19), the content is prefixed with an
+    Reuses ``_format.render_message_body`` (the unwrapped plaintext — never the ciphertext).
+    When the sender signature is ``unverifiable``, the content is prefixed with an
     ``[unverified sender]`` marker so the resumed graph/LLM sees the body is untrusted; a
     ``verified`` message is passed clean. (An ``invalid`` signature never reaches here — the
     resumer skips it via :func:`verification_blocks_resume`.)
 
-    ``args`` is a dict so the graph's reply node can reply IN-PLACE (REQ-FORK-01): it carries
+    ``args`` is a dict so the graph's reply node can reply IN-PLACE: it carries
     ``rine_message_id`` (the inbound id, for ``rine_reply(message_id=…)`` which preserves the
     conversation instead of forking via ``rine_send``) and ``rine_conversation_id`` alongside the
-    ``text``. Both ids are routing metadata, not ciphertext (I-2 safe). Graph nodes read
+    ``text``. Both ids are routing metadata, not ciphertext. Graph nodes read
     ``args["text"]`` / ``args["rine_message_id"]``. :meth:`RineThreadResumer.expire` emits the same
     ``{"text": …}`` shape (without ids — a synthetic note has no real message to reply to).
     """

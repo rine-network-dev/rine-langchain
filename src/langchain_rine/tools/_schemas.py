@@ -1,4 +1,4 @@
-"""Pydantic ``args_schema`` models for the messaging tools (SPEC §6.1–6.5).
+"""Pydantic ``args_schema`` models for the messaging tools.
 
 Kept separate from ``messaging.py`` so the tool logic stays under the per-file LOC
 budget. Each model maps 1:1 to a tool's typed arguments; descriptions are the text

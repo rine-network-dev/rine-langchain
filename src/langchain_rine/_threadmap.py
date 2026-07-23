@@ -3,23 +3,23 @@
 The Tier-3 idle-wake resumer (``inbound.py``) needs to know which paused LangGraph
 thread an inbound rine message should wake. That binding is the
 ``(sender_handle, conversation_id) -> thread_id`` map this module's stores hold, plus the
-v0.3 **consumed-message-id journal** that makes a resume exactly-once (D20).
+v0.3 **consumed-message-id journal** that makes a resume exactly-once.
 
-Two implementations behind one :class:`ThreadMapStore` protocol (D14):
+Two implementations behind one :class:`ThreadMapStore` protocol:
 
 - :class:`InMemoryThreadMap` — dicts; the default for tests / ephemeral runs, pairs with
   ``InMemorySaver``.
 - :class:`SqliteThreadMap` (re-exported from ``_sqlite_store``) — **stdlib ``sqlite3`` + a
-  lazily-imported ``aiosqlite`` async path (D21)**, co-located with the checkpointer db. The
+  lazily-imported ``aiosqlite`` async path**, co-located with the checkpointer db. The
   **documented production default**: both the binding and the consumed journal must survive a
-  process restart for cross-process handoffs + exactly-once to work (SPEC §11/§17).
+  process restart for cross-process handoffs + exactly-once to work.
 
 The protocol carries the sync surface (``get``/``put``/``delete``/``items``), the consumed
 journal (``is_consumed``/``mark_consumed``/``drop_consumed``), and the async twins the resumer's
 async path awaits (``aget``/``aput``/``adelete``/``ais_consumed``/``amark_consumed``/
-``adrop_consumed`` — D21).
+``adrop_consumed``).
 
-The whole module is side-effect-free at import (invariant I-1): no network, no credentials, no
+The whole module is side-effect-free at import: no network, no credentials, no
 client construction, no aiosqlite (its import is lazy inside ``SqliteThreadMap``).
 """
 
@@ -41,10 +41,10 @@ class ThreadMapStore(Protocol):
 
     Maps a ``(handle, conversation_id)`` key to the id of the LangGraph thread that is (or
     will be) paused awaiting that conversation's next inbound message, and journals the
-    message ids already resumed-and-recorded (the D20 exactly-once guard). Both key fields are
+    message ids already resumed-and-recorded (the exactly-once guard). Both key fields are
     the real ``rine`` ``DecryptedMessage`` attributes (sender handle + ``conversation_id``).
 
-    The async twins (``a*``) mirror the sync surface the resumer's async path uses (D21); an
+    The async twins (``a*``) mirror the sync surface the resumer's async path uses; an
     in-process store may delegate them straight to the sync methods, a sqlite store backs them
     with aiosqlite to avoid blocking the event loop.
     """
@@ -66,7 +66,7 @@ class ThreadMapStore(Protocol):
         """Iterate ``((handle, conversation_id), thread_id)`` for every binding."""
         ...
 
-    # --- consumed-message-id journal (D20 exactly-once) ---
+    # --- consumed-message-id journal (exactly-once) ---
     def is_consumed(self, handle: str, conversation_id: str, message_id: str) -> bool:
         """True iff ``message_id`` was already resumed-and-recorded for this conversation."""
         ...
@@ -79,7 +79,7 @@ class ThreadMapStore(Protocol):
         """Drop the consumed journal entry for ``message_id`` (self-clean after ack)."""
         ...
 
-    # --- async twins (D21) ---
+    # --- async twins ---
     async def aget(self, handle: str, conversation_id: str) -> str | None:
         """Async twin of :meth:`get`."""
         ...

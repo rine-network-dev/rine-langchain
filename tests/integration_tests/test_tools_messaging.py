@@ -1,9 +1,9 @@
-"""``langchain-tests`` conformance for the five messaging tools (SPEC §6.1-6.5, §13).
+"""``langchain-tests`` conformance for the five messaging tools.
 
 One ``ToolsUnitTests`` + one ``ToolsIntegrationTests`` subclass per tool. The integration
 suite invokes each tool over the real SDK against respx-mocked endpoints; the happy paths
 mirror ``tests/unit_tests`` (send confirm, send-and-wait timeout, empty inbox, MLS read,
-reply id). Every tool returns a ``str`` (D5), so the suite's artifact assertion never fires.
+reply id). Every tool returns a ``str``, so the suite's artifact assertion never fires.
 """
 
 from __future__ import annotations

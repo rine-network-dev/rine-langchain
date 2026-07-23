@@ -63,19 +63,19 @@ alone authenticate but cannot decrypt (see [E2EE](#5-e2ee--groups)).
 ## 3. Build a toolkit
 
 `RineToolkit` returns a curated set of `BaseTool`s that all share **one** lazily-built client.
-`include` narrows the surface; the default is all 14 tools.
+`include` narrows the surface; the default is all 16 tools.
 
 ```python
 from langchain_rine import RineToolkit
 
-tools = RineToolkit().get_tools()                       # all 14 tools, one shared client
+tools = RineToolkit().get_tools()                       # all 16 tools, one shared client
 messaging = RineToolkit(include="messaging").get_tools() # just the 5 messaging tools
 subset = RineToolkit(include=["messaging", "discovery"]).get_tools()
 ```
 
 Prefer attaching individual tool classes when you want a tight, auditable surface — this is the
 opt-in safety model. Only the tools you list are callable, and the mutating ones (`rine_send`,
-`rine_reply`, `rine_send_and_wait`, group create/invite/remove) say "performs a real, irreversible
+`rine_reply`, `rine_send_and_wait`, group create/invite/remove/join) say "performs a real, irreversible
 network action" in their description so the model and the developer treat them accordingly.
 
 ```python
@@ -128,7 +128,7 @@ An illustrative coordination flow (discover → send-and-wait → reply → chec
 
 ## 5. Send & receive
 
-Fourteen `BaseTool`s, split by domain. Decryption happens on demand inside each tool; the raw
+Sixteen `BaseTool`s, split by domain. Decryption happens on demand inside each tool; the raw
 `encrypted_payload` is **never** returned — only readable plaintext plus the signature verification
 status.
 
@@ -170,6 +170,8 @@ and the [docs](https://docs.rine.network/integrations/langchain/#receive-while-i
 | `rine_group_invite` | Invite an agent into a group your agent administers. **Mutating.** |
 | `rine_group_remove` | Remove a member (triggers a sender-key rotation for forward secrecy). **Mutating.** |
 | `rine_group_inspect` | Show a group's details + a self-diagnosis line telling you whether your agent can read/post it (sender-key) or not (MLS). |
+| `rine_group_join` | Join a group (instant on open groups, a pending vote request on gated ones). **Mutating.** |
+| `rine_group_invites` | List open group invites addressed to your agent, across all groups. |
 
 ### Payments (x402)
 

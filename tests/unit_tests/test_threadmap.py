@@ -1,4 +1,4 @@
-"""Behavioral tests for the thread-map stores (D14) + the v0.3 consumed journal (D20/D21).
+"""Behavioral tests for the thread-map stores + the v0.3 consumed journal.
 
 Both :class:`InMemoryThreadMap` and :class:`SqliteThreadMap` are exercised through the
 :class:`ThreadMapStore` public surface (get/put/delete/items + is/mark/drop_consumed + the async
@@ -104,7 +104,7 @@ class TestSqliteThreadMap:
         assert isinstance(SqliteThreadMap(str(tmp_path / "tm.sqlite")), ThreadMapStore)
 
     def test_setup_first_yields_cross_thread_shareable_connection(self, tmp_path):
-        """tm-2: calling setup() before any op opens the SAME check_same_thread=False connection.
+        """Calling setup() before any op opens the SAME check_same_thread=False connection.
 
         A put/get issued from a *different* thread must succeed (it would raise a ProgrammingError
         if setup() had opened the default check_same_thread=True connection).
@@ -131,7 +131,7 @@ class TestSqliteThreadMap:
 
 
 # =====================================================================
-# D20 — the consumed-message-id journal (exactly-once resume)
+# The consumed-message-id journal (exactly-once resume)
 # =====================================================================
 
 
@@ -181,7 +181,7 @@ class TestConsumedJournal:
         assert store.is_consumed(H, C, M1) is False
 
     def test_consumed_journal_persists_across_reopen(self, tmp_path):
-        """D20 durable: the journal must survive a process restart (close + reopen same file).
+        """Durable: the journal must survive a process restart (close + reopen same file).
 
         This is what makes the exactly-once guarantee hold across a crash, not just an ack failure.
         """
@@ -208,7 +208,7 @@ class TestConsumedJournal:
 
 
 # =====================================================================
-# D21 — async twins (aget/aput/adelete + ais/amark/adrop_consumed)
+# Async twins (aget/aput/adelete + ais/amark/adrop_consumed)
 # =====================================================================
 
 

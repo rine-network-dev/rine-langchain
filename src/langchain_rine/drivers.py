@@ -1,29 +1,29 @@
-"""Drivers that feed inbound rine messages to a :class:`RineThreadResumer` (D15/D22).
+"""Drivers that feed inbound rine messages to a :class:`RineThreadResumer`.
 
 The resumer (``inbound.py``) is transport-agnostic — it only knows graphs + a thread-map. The
 **driver** owns the rine client and the ingress shape:
 
-- :class:`PollDriver` — the **launch default** (D8/D15): loops ``client.inbox(status="new")``,
+- :class:`PollDriver` — the **launch default**: loops ``client.inbox(status="new")``,
   hands each message to the resumer, and **acks the messages whose result is
   :attr:`~langchain_rine._resume.ResumeResult.should_ack`** (``RESUMED`` +
-  ``SKIPPED_ALREADY_CONSUMED`` — D20; every other skip leaves the message in the inbox for a later
-  poll, D16). After a *successful* ack it calls ``resumer.confirm_delivered`` to self-clean the
-  consumed journal (D20). An optional :class:`~langchain_rine._lease.Lease` makes it the **single
-  poller** for an inbox (D22). Needs no public URL, runs anywhere.
-- :func:`make_webhook_handler` — the **webhook path is a handler hook, NOT an ingress server**
-  (D15/D19): the package ships no ports / no public URL. The user's route verifies the rine
+  ``SKIPPED_ALREADY_CONSUMED``; every other skip leaves the message in the inbox for a later
+  poll). After a *successful* ack it calls ``resumer.confirm_delivered`` to self-clean the
+  consumed journal. An optional :class:`~langchain_rine._lease.Lease` makes it the **single
+  poller** for an inbox. Needs no public URL, runs anywhere.
+- :func:`make_webhook_handler` — the **webhook path is a handler hook, NOT an ingress server**:
+  the package ships no ports / no public URL. The user's route verifies the rine
   outbound-webhook signature, then passes the **message id**; the handler does the authenticated
   + E2EE ``client.read(message_id)`` fetch (never trusting a caller-supplied body), resumes, and
   acks + confirms exactly like one poll step.
 
 The rine client is built lazily (``build_client`` / ``abuild_client`` from ``_client.py``,
 threading the same ``config_dir`` / ``api_url`` / ``agent`` overrides as ``BaseRineTool``) so the
-import stays side-effect-free (I-1).
+import stays side-effect-free.
 
-**Exactly-once (D20):** the resumer records each resumed message in a durable consumed journal
+**Exactly-once:** the resumer records each resumed message in a durable consumed journal
 *before* the ack is attempted, so an ack failure no longer double-resumes — a redelivery is
 recognized as ``SKIPPED_ALREADY_CONSUMED`` and re-acked. Run **one PollDriver per inbox** (the
-optional lease enforces it); webhook-vs-poll coordination stays documented, not enforced (D22).
+optional lease enforces it); webhook-vs-poll coordination stays documented, not enforced.
 """
 
 from __future__ import annotations
@@ -52,19 +52,19 @@ __all__ = ["PollDriver", "make_webhook_handler"]
 def _ackable(
     messages: list[DecryptedMessage], results: list[ResumeResult]
 ) -> list[DecryptedMessage]:
-    """Return the messages whose result is :attr:`ResumeResult.should_ack` (D20 ack policy)."""
+    """Return the messages whose result is :attr:`ResumeResult.should_ack` (ack policy)."""
     return [m for m, r in zip(messages, results, strict=True) if r.should_ack]
 
 
 class PollDriver:
-    """Poll ``client.inbox(status="new")`` and resume matching paused graphs (D15/D22).
+    """Poll ``client.inbox(status="new")`` and resume matching paused graphs.
 
     Owns the rine client (lazy, side-effect-free import). ``poll_once`` / ``apoll_once`` do one
     fetch-resume-ack-confirm sweep and return the per-message :class:`ResumeResult`s — tests drive
     those directly (no infinite loop). ``run`` / ``arun`` wrap them in a thin sleep loop bounded by
     an optional ``max_iterations`` and release the lease in a ``finally``. With a
     :class:`~langchain_rine._lease.Lease`, a sweep that loses the lease to another live owner
-    fetches nothing and returns ``[]`` (D22).
+    fetches nothing and returns ``[]``.
     """
 
     def __init__(
@@ -80,7 +80,7 @@ class PollDriver:
     ) -> None:
         """Bind the resumer + the SDK overrides; the client is built lazily on first poll.
 
-        ``lease`` (D22) makes this the single poller for an inbox: each sweep acquires-or-renews it
+        ``lease`` makes this the single poller for an inbox: each sweep acquires-or-renews it
         and backs off (fetches nothing) when another live owner holds it. ``lease_ttl`` must exceed
         **the poll ``interval`` AND the worst-case sweep/resume duration**: the lease gates sweep
         entry only (not the in-sweep fetch/resume/ack work), and its expiry is fixed at acquire
@@ -118,8 +118,8 @@ class PollDriver:
         """One sync sweep: acquire the lease, fetch, resume, ack the should_ack ids, confirm.
 
         If a lease is set and another live owner holds it, the sweep fetches nothing and returns
-        ``[]`` (D22). After a *successful* ack each acked message's journal entry is dropped via
-        ``confirm_delivered`` (D20 self-clean).
+        ``[]``. After a *successful* ack each acked message's journal entry is dropped via
+        ``confirm_delivered`` (self-clean).
         """
         if self._lease is not None and not self._lease.acquire(self._lease_ttl):
             logger.info("PollDriver: another consumer holds the inbox lease; backing off")
@@ -188,9 +188,9 @@ class PollDriver:
     def run(self, *, interval: float = 2.0, max_iterations: int | None = None) -> None:
         """Poll forever (or ``max_iterations`` times), sleeping ``interval`` s between sweeps.
 
-        A sweep is wrapped (``I-3``): a transient ``client.inbox`` failure logs a warning and the
+        A sweep is wrapped: a transient ``client.inbox`` failure logs a warning and the
         loop continues (the ``interval`` sleep is the backoff). The lease (if any) is released in a
-        ``finally`` so a clean shutdown frees the inbox for another poller immediately (D22).
+        ``finally`` so a clean shutdown frees the inbox for another poller immediately.
         """
         count = 0
         try:
@@ -235,13 +235,13 @@ def make_webhook_handler(
     api_url: str | None = None,
     agent: str | None = None,
 ) -> Callable[[str], ResumeResult]:
-    """Build a one-**message-id** handler the user mounts on their OWN web route (D15/D19).
+    """Build a one-**message-id** handler the user mounts on their OWN web route.
 
     The package ships **no** ingress server: it returns a plain ``Callable[[str], ResumeResult]``.
     Your route MUST first **verify the rine outbound-webhook signature** (HMAC), then pass the
     ``message_id`` — the handler does the authenticated + E2EE ``client.read(message_id)`` fetch
     and **never trusts a caller-supplied body** (a forged ``message.received`` POST cannot inject
-    content into a paused graph, ``wh-1``). It then resumes the matching paused graph and acks +
+    content into a paused graph). It then resumes the matching paused graph and acks +
     confirms the message when the result is :attr:`ResumeResult.should_ack` (mirroring one
     :meth:`PollDriver.poll_once` step). The rine client is built lazily from the same overrides.
     """

@@ -12,7 +12,7 @@ authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
 keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
 # Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
 # "langchain-rine"), so the installed metadata (this literal) is the only version string.
-version = "0.5.0"
+version = "0.6.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -28,13 +28,13 @@ dependencies = [
     # Dev/CI consume the LOCAL ./rine-sdk (editable path dep injected inside the rig via the
     # `--override rine @ file:///work/rine-sdk` — see compose.langchain.yml + Dockerfile +
     # entrypoint.sh). That editable SDK carries any unreleased fixes. The published floor
-    # below is the *intended* runtime pin (D12); the rig installs ./rine-sdk over this entry,
+    # below is the *intended* runtime pin; the rig installs ./rine-sdk over this entry,
     # so the pin is documented, not active in dev. Floored at 0.8.0 so the x402 payee
     # orchestrator (rine.x402.fulfill) the rine_fulfill tool wraps is guaranteed present;
-    # pip is uncapped, so a fresh install resolves the newest rine (>= 0.8.0). Signing
+    # pip is uncapped, so a fresh install resolves the newest rine (>= 0.9.0). Signing
     # (rine_pay) needs the SDK's `payments` extra — see the `payments` extra below.
-    "rine>=0.8.0",  # PUBLISHED FLOOR (intended): first rine carrying rine.x402.payee (D3).
-    "langchain-core>=1.0,<2.0",  # exact min verified in Phase 0 (P0-1)
+    "rine>=0.9.0",  # PUBLISHED FLOOR: first rine on the rine-mls core (pre-0.9 lacks the native wheel these tools now need).
+    "langchain-core>=1.0,<2.0",  # exact min verified
     "pydantic>=2.0",
 ]
 
@@ -45,37 +45,37 @@ Repository = "https://codeberg.org/rine/rine-langchain"
 Issues = "https://codeberg.org/rine/rine-langchain/issues"
 
 [project.optional-dependencies]
-# v0.2 Tier-3 idle-wake resumer (D17). LangGraph is NOT a core runtime dep — attaching the
+# v0.2 Tier-3 idle-wake resumer. LangGraph is NOT a core runtime dep — attaching the
 # 11 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
 # the opt-in; this extra supplies langgraph + the durable sqlite checkpointer the resumer's
 # caller-owned `SqliteSaver` lifecycle needs. (The resumer's own thread-map uses stdlib sqlite3.)
 inbound = [
     "langgraph>=1.2,<2.0",                 # resolved 1.2.4 — interrupt()/Command + Agent-Inbox schema
     "langgraph-checkpoint-sqlite>=3.0,<4", # resolved 3.1.0 — SqliteSaver/AsyncSqliteSaver (durable)
-    "aiosqlite>=0.20",                     # resolved 0.22.1 — async SqliteThreadMap store (D21)
+    "aiosqlite>=0.20",                     # resolved 0.22.1 — async SqliteThreadMap store
 ]
 # rine_pay signs an EIP-3009 authorization, which needs the SDK's optional `payments`
 # extra (eth-account). rine_fulfill (payee) does NOT sign — it only needs base `rine`.
 # Install `langchain-rine[payments]` to enable paying.
 payments = [
-    "rine[payments]>=0.8.0",
+    "rine[payments]>=0.9.0",
 ]
-# Pins resolved + verified by Phase-0-verify inside the rig (SPEC §5 P0-1/P0-4, §18 / PHASE0_CONTRACT.md).
+# Pins resolved + verified inside the rig.
 # Resolved set (2026-06-11): langchain-core 1.4.4 · langchain 1.3.7 · langchain-tests 1.1.9 ·
 # langgraph 1.2.4 · langchain-openai 1.3.0 · pydantic 2.13.4 · pytest 9.0.3 · pytest-asyncio 1.4.0.
 dev = [
     "pytest>=8.0",            # langchain-tests forces >=9.0.3 transitively; resolved 9.0.3
     "respx>=0.22",            # resolved 0.23.1
-    # `langchain` meta-pkg provides langchain.agents.create_agent (P0-1). It is NOT pulled
+    # `langchain` meta-pkg provides langchain.agents.create_agent. It is NOT pulled
     # transitively by langchain-tests / langgraph / langchain-openai — it MUST be explicit.
     "langchain>=1.0,<2.0",
-    "langchain-tests==1.1.9", # pinned EXACTLY (SPEC §13/§15 conformance claim); brings pytest 9.x + pytest-asyncio 1.x + pytest-socket
+    "langchain-tests==1.1.9", # pinned EXACTLY (conformance claim); brings pytest 9.x + pytest-asyncio 1.x + pytest-socket
     "langgraph>=1.2,<2.0",    # resolved 1.2.4
     "langgraph-checkpoint-sqlite>=3.0,<4",  # resolved 3.1.0 — durable SqliteSaver for the Tier-3 resumer tests (v0.2)
-    "aiosqlite>=0.20",        # resolved 0.22.1 — async SqliteThreadMap store tests (v0.3, D21)
+    "aiosqlite>=0.20",        # resolved 0.22.1 — async SqliteThreadMap store tests (v0.3)
     "langchain-openai>=1.0,<2.0",  # resolved 1.3.0 (e2e live-LLM agent)
     "ruff>=0.8",              # resolved 0.15.16
-    "mypy>=1.13",             # resolved 2.1.0 (mypy 2.x — see PHASE0_CONTRACT spec-amendments)
+    "mypy>=1.13",             # resolved 2.1.0 (mypy 2.x)
     # x402 payer signing: the rine_pay tests exercise the real EIP-3009 sign path, so the
     # dev/rig env always carries the SDK's (otherwise optional) `payments` extra. Listed
     # directly (not via `rine[payments]`) because the rig `--override rine @ file://…` pins
@@ -84,7 +84,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["phases/", "e2e/", "tests/", "examples/"]
+exclude = ["phases/", "e2e/", "tests/", "examples/", ".e2e.env", "*.env", ".uv-cache/", ".venv/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/langchain_rine"]
@@ -92,7 +92,7 @@ packages = ["src/langchain_rine"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# REQUIRED (Phase-0 P0-4): the langchain-tests ToolsIntegrationTests base class ships
+# REQUIRED: the langchain-tests ToolsIntegrationTests base class ships
 # `async def test_async_invoke_*` cases. Without auto asyncio mode they ERROR with
 # "async def functions are not natively supported". pytest-asyncio arrives via langchain-tests.
 asyncio_mode = "auto"

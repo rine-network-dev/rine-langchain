@@ -1,13 +1,13 @@
-"""Behavioral tests for the group tools (SPEC §6.8-6.12, §9.1).
+"""Behavioral tests for the group tools.
 
-Covers create (sender-key, single-call with description, no mls_enabled field),
-invite, remove, and inspect's sender-key-vs-MLS self-diagnosis line. The
+Covers create (post-quantum MLS by default, single-call with description, no
+mls_enabled field), invite, remove, and inspect's encryption-type line. The
 ``#``-prefix group send/read routing is asserted via RineSendTool against a
 sender-key group (verifies group send rides the messaging tool, not a separate
 group-send tool) and via RineCheckInboxTool returning a group message.
 
 Tools are driven through their public LangChain interface: ``.invoke({...})``
-(sync) and ``.ainvoke({...})`` (async, AC-8). respx intercepts httpx regardless
+(sync) and ``.ainvoke({...})`` (async). respx intercepts httpx regardless
 of sync/async transport, so the same mock backs both paths.
 """
 
@@ -23,7 +23,9 @@ from langchain_rine import (
     RineCheckInboxTool,
     RineGroupCreateTool,
     RineGroupInspectTool,
+    RineGroupInvitesTool,
     RineGroupInviteTool,
+    RineGroupJoinTool,
     RineGroupRemoveTool,
     RineSendTool,
 )
@@ -49,37 +51,44 @@ from ..conftest import (
 
 class TestRineGroupCreateTool:
     def test_create_input_schema_has_no_mls_enabled_field(self):
-        """The toggle is hidden by design (SDK forces mls_enabled=False)."""
+        """The toggle is hidden by design (the SDK picks the encryption)."""
         fields = set(RineGroupCreateInput.model_fields)
         assert "mls_enabled" not in fields
         assert fields == {"name", "enrollment", "visibility", "description"}
 
     @respx.mock
-    def test_create_group_returns_sender_key_confirmation(self, config_dir):
+    def test_create_group_returns_mls_confirmation(self, config_dir):
         mock_token()
         mock_agents()
         respx.post(f"{API_URL}/groups").mock(
-            return_value=httpx.Response(200, json=group_payload(name="ops"))
+            return_value=httpx.Response(200, json=group_payload(name="ops", mls_enabled=True))
+        )
+        respx.post(f"{API_URL}/groups/{GROUP_ID}/mls/init").mock(
+            return_value=httpx.Response(200, json={"members": [{"agent_id": AGENT_ID}]})
         )
 
         out = RineGroupCreateTool(config_dir=config_dir, api_url=API_URL).invoke({"name": "ops"})
 
         assert "Created group" in out
         assert GROUP_HANDLE in out
-        assert "sender-key E2EE" in out
+        assert "post-quantum MLS E2EE" in out
 
     @respx.mock
-    def test_create_group_forces_mls_disabled_on_the_wire(self, config_dir):
+    def test_create_group_enables_mls_on_the_wire(self, config_dir):
+        """New groups default to post-quantum MLS: the create body carries mls_enabled=True."""
         mock_token()
         mock_agents()
         route = respx.post(f"{API_URL}/groups").mock(
-            return_value=httpx.Response(200, json=group_payload(name="ops"))
+            return_value=httpx.Response(200, json=group_payload(name="ops", mls_enabled=True))
+        )
+        respx.post(f"{API_URL}/groups/{GROUP_ID}/mls/init").mock(
+            return_value=httpx.Response(200, json={"members": [{"agent_id": AGENT_ID}]})
         )
 
         RineGroupCreateTool(config_dir=config_dir, api_url=API_URL).invoke({"name": "ops"})
 
         body = json.loads(route.calls[0].request.content)
-        assert body["mls_enabled"] is False
+        assert body["mls_enabled"] is True
 
     @respx.mock
     def test_create_group_with_description_is_a_single_call(self, config_dir):
@@ -118,7 +127,7 @@ class TestRineGroupCreateTool:
 
     @respx.mock
     async def test_create_group_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same sender-key confirmation as ``.invoke``."""
+        """``.ainvoke`` returns the same sender-key confirmation as ``.invoke``."""
         mock_token()
         mock_agents()
         respx.post(f"{API_URL}/groups").mock(
@@ -182,6 +191,150 @@ class TestRineGroupRemoveTool:
 
 
 # =====================================================================
+# RineGroupJoinTool / RineGroupInvitesTool
+# =====================================================================
+
+# Server response shapes copied field-for-field from rine-sdk's test fixtures
+# (GroupMemberRead / JoinRequestRead — see rine-sdk/tests/test_groups.py).
+_MEMBER_ID = "eeeeeeee-ffff-0000-1111-222222222222"
+_REQUEST_ID = "ffffffff-0000-1111-2222-333333333333"
+
+_MEMBER_PAYLOAD = {
+    "id": _MEMBER_ID,
+    "group_id": GROUP_ID,
+    "agent_id": AGENT_ID,
+    "role": "member",
+    "joined_at": "2024-01-01T00:00:00Z",
+    "agent_handle": "test-agent@myorg.rine.network",
+    "pending_mls_join": False,
+    "pending_mls_remove": False,
+}
+
+_PENDING_REQUEST_PAYLOAD = {
+    "id": _REQUEST_ID,
+    "group_id": GROUP_ID,
+    "agent_id": AGENT_ID,
+    "invited_by": None,
+    "message": "please let me in",
+    "status": "pending",
+    "expires_at": "2024-01-08T00:00:00Z",
+    "created_at": "2024-01-01T00:00:00Z",
+    "resolved_at": None,
+    "your_vote": None,
+}
+
+_INVITE_PAYLOAD = {
+    "id": _REQUEST_ID,
+    "group_id": GROUP_ID,
+    "agent_id": AGENT_ID,
+    "invited_by": OTHER_AGENT_ID,
+    "message": "join us",
+    "status": "invited",
+    "created_at": "2024-01-01T00:00:00Z",
+    "group_handle": GROUP_HANDLE,
+    "group_name": "ops",
+}
+
+
+class TestRineGroupJoinTool:
+    @respx.mock
+    def test_join_open_group_returns_joined_string(self, config_dir):
+        mock_token()
+        mock_agents()
+        route = respx.post(f"{API_URL}/groups/{GROUP_ID}/join").mock(
+            return_value=httpx.Response(200, json=_MEMBER_PAYLOAD)
+        )
+
+        out = RineGroupJoinTool(config_dir=config_dir, api_url=API_URL).invoke({"group": GROUP_ID})
+
+        assert route.called
+        assert f"Joined {GROUP_ID}" in out
+        assert AGENT_ID in out
+
+    @respx.mock
+    def test_join_gated_group_returns_pending_string(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.post(f"{API_URL}/groups/{GROUP_ID}/join").mock(
+            return_value=httpx.Response(202, json=_PENDING_REQUEST_PAYLOAD)
+        )
+
+        out = RineGroupJoinTool(config_dir=config_dir, api_url=API_URL).invoke(
+            {"group": GROUP_ID, "message": "please let me in"}
+        )
+
+        assert f"Requested to join {GROUP_ID}" in out
+        assert _REQUEST_ID in out
+        assert "awaiting a member vote" in out
+
+    @respx.mock
+    def test_join_unknown_group_returns_clear_string(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.post(f"{API_URL}/groups/{GROUP_ID}/join").mock(
+            return_value=httpx.Response(404, json={"detail": "group not found"})
+        )
+
+        out = RineGroupJoinTool(config_dir=config_dir, api_url=API_URL).invoke({"group": GROUP_ID})
+
+        assert "group not found" in out
+
+    @respx.mock
+    async def test_join_arun_matches_run(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.post(f"{API_URL}/groups/{GROUP_ID}/join").mock(
+            return_value=httpx.Response(200, json=_MEMBER_PAYLOAD)
+        )
+
+        out = await RineGroupJoinTool(config_dir=config_dir, api_url=API_URL).ainvoke(
+            {"group": GROUP_ID}
+        )
+
+        assert f"Joined {GROUP_ID}" in out
+
+
+class TestRineGroupInvitesTool:
+    @respx.mock
+    def test_invites_lists_pending_invite(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/groups/invites").mock(
+            return_value=httpx.Response(200, json={"items": [_INVITE_PAYLOAD]})
+        )
+
+        out = RineGroupInvitesTool(config_dir=config_dir, api_url=API_URL).invoke({})
+
+        assert GROUP_HANDLE in out
+        assert _REQUEST_ID in out
+        assert "invited" in out
+
+    @respx.mock
+    def test_invites_empty_returns_no_pending_string(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/groups/invites").mock(
+            return_value=httpx.Response(200, json={"items": []})
+        )
+
+        out = RineGroupInvitesTool(config_dir=config_dir, api_url=API_URL).invoke({})
+
+        assert out == "No pending group invites."
+
+    @respx.mock
+    async def test_invites_arun_matches_run(self, config_dir):
+        mock_token()
+        mock_agents()
+        respx.get(f"{API_URL}/groups/invites").mock(
+            return_value=httpx.Response(200, json={"items": [_INVITE_PAYLOAD]})
+        )
+
+        out = await RineGroupInvitesTool(config_dir=config_dir, api_url=API_URL).ainvoke({})
+
+        assert GROUP_HANDLE in out
+
+
+# =====================================================================
 # RineGroupInspectTool — sender-key vs MLS self-diagnosis
 # =====================================================================
 
@@ -202,12 +355,12 @@ class TestRineGroupInspectTool:
         )
 
         assert "[OK] sender-key group" in out
-        assert "readable/postable" in out
+        assert "readable and postable" in out
         assert GROUP_HANDLE in out
 
     @respx.mock
-    def test_inspect_mls_group_reports_unreadable_wall(self, config_dir):
-        """An MLS group surfaces the honest ceiling — never a false 'readable'."""
+    def test_inspect_mls_group_reports_post_quantum_readable(self, config_dir):
+        """An MLS group reports post-quantum encryption — readable and postable from here."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/groups").mock(
@@ -220,12 +373,12 @@ class TestRineGroupInspectTool:
             {"group": GROUP_HANDLE}
         )
 
-        assert "[WARN] MLS group" in out
-        assert "cannot read or post" in out
+        assert "[OK] post-quantum MLS group" in out
+        assert "readable and postable" in out
 
     @respx.mock
-    def test_inspect_mls_pending_group_reports_unreadable_wall(self, config_dir):
-        """The brief mls_pending init window also latches as MLS (P0-4 widen)."""
+    def test_inspect_mls_pending_group_reports_post_quantum(self, config_dir):
+        """The brief mls_pending init window also latches as MLS."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/groups").mock(
@@ -243,7 +396,7 @@ class TestRineGroupInspectTool:
             {"group": GROUP_HANDLE}
         )
 
-        assert "[WARN] MLS group" in out
+        assert "[OK] post-quantum MLS group" in out
 
     @respx.mock
     def test_inspect_accepts_bare_group_name(self, config_dir):

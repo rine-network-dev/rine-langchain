@@ -20,6 +20,7 @@ import pytest
 from rine import SyncRineClient
 from rine._config import save_credentials
 from rine._constants import MessageType
+from rine._crypto.dm_envelope import RecipientKeys
 from rine._crypto.keys import (
     encryption_public_key_to_jwk,
     generate_agent_keys,
@@ -38,6 +39,7 @@ GROUP_ID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
 MESSAGE_ID = "cccccccc-dddd-eeee-ffff-000000000001"
 CONVERSATION_ID = "cccccccc-dddd-eeee-ffff-000000000002"
 REPLY_ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+WELCOME_ID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 
 OTHER_HANDLE = "other@acme.rine.network"
 GROUP_HANDLE = "#ops@acme.rine.network"
@@ -145,6 +147,75 @@ def mock_sender_keys_unverifiable(agent_id: str = AGENT_ID) -> None:
     )
 
 
+def establish_mls_group_state(config_dir: str) -> None:
+    """Give AGENT_ID genuine local MLS state for ``GROUP_ID``, so a group send posts.
+
+    A real second agent founds the post-quantum (X-Wing) MLS group and admits
+    AGENT_ID via a real Welcome; AGENT_ID installs it and can then encrypt/decrypt
+    in the group. Only the HTTP boundary is mocked — the MLS crypto is the real
+    Rust core, exactly as in ``rine-sdk``'s own MLS suite. Call inside an active
+    ``@respx.mock`` after ``mock_token()``; it also stubs the group's Welcome and
+    handshake endpoints (empty past install), leaving the caller to mock only the
+    group resolve (``GET /groups``) and the ``POST /messages`` send.
+    """
+    import base64
+    import json
+
+    import respx
+    from rine._mls import (
+        mls_group_id_bytes,
+        open_mls_client,
+        process_mls_welcomes,
+        publish_mls_key_packages,
+    )
+
+    # Mint + capture AGENT_ID's KeyPackage (public half) the founder will admit.
+    kp_route = respx.post(f"{API_URL}/agents/{AGENT_ID}/mls/key-packages").mock(
+        return_value=httpx.Response(201, json={"stored": 10})
+    )
+    client = SyncRineClient(config_dir=config_dir, api_url=API_URL)
+    try:
+        publish_mls_key_packages(client._http, config_dir, AGENT_ID)
+        key_package = base64.b64decode(
+            json.loads(kp_route.calls[0].request.content)["packages"][0], validate=True
+        )
+
+        # A real second agent founds the group admitting AGENT_ID's KeyPackage.
+        peer_dir = f"{config_dir}/_peer"
+        save_agent_keys(peer_dir, OTHER_AGENT_ID, generate_agent_keys())
+        peer = open_mls_client(peer_dir, OTHER_AGENT_ID)
+        group = peer.create_group_with_members(mls_group_id_bytes(GROUP_ID), [key_package])
+        group.save()
+        welcome = group.last_commit().welcomes[0]
+
+        # Deliver the Welcome once (then nothing) so AGENT_ID installs its own state.
+        respx.get(f"{API_URL}/agents/{AGENT_ID}/mls/welcomes").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "welcomes": [
+                            {
+                                "id": WELCOME_ID,
+                                "group_id": GROUP_ID,
+                                "blob": base64.b64encode(welcome).decode("ascii"),
+                                "created_at": "2024-01-01T00:00:00Z",
+                            }
+                        ]
+                    },
+                ),
+                *[httpx.Response(200, json={"welcomes": []}) for _ in range(9)],
+            ]
+        )
+        # The pre-send sync finds no newer epoch to catch up to.
+        respx.get(f"{API_URL}/groups/{GROUP_ID}/mls/handshakes").mock(
+            return_value=httpx.Response(200, json={"handshakes": []})
+        )
+        process_mls_welcomes(client._http, config_dir, AGENT_ID)
+    finally:
+        client.close()
+
+
 def hpke_self_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
     """HPKE-encrypt ``payload`` from AGENT_ID to AGENT_ID (self-readable).
 
@@ -152,8 +223,11 @@ def hpke_self_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
     can actually decrypt, so plaintext + ciphertext-invariant assertions run the
     real crypto path.
     """
-    own_pk = load_agent_keys(config_dir, AGENT_ID).encryption.public_key
-    return encrypt_message(config_dir, AGENT_ID, own_pk, payload).encrypted_payload
+    # Classical on purpose: the recipient's ML-KEM half is left out so this helper
+    # keeps producing `hpke-v1`, which is what the fixtures around it declare.
+    own = load_agent_keys(config_dir, AGENT_ID)
+    recipient = RecipientKeys(encryption=own.encryption.public_key)
+    return encrypt_message(config_dir, AGENT_ID, recipient, payload).encrypted_payload
 
 
 def decrypt_self_wire(config_dir: str, encrypted_payload_b64: str) -> str:

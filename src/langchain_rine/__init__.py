@@ -4,18 +4,17 @@ Thin adapter layer: pydantic ``args_schema`` → ``rine`` client method → huma
 string. All crypto, HTTP, config resolution, and types come from the ``rine`` SDK; this
 package never reimplements them.
 
-Import is side-effect-free (invariant I-1): no network call, no credential read, and no
+Import is side-effect-free: no network call, no credential read, and no
 client construction happens at import time. Clients (``SyncRineClient`` for ``_run``,
 async ``RineClient`` for ``_arun``) are built lazily on first tool invocation.
 
 Public surface:
 
 - Tools — attach the ones an agent needs to ``create_agent(model, tools=[...])``;
-  **attachment is the opt-in** (SPEC §6). Mutating tools (send/reply/send_and_wait,
+  **attachment is the opt-in**. Mutating tools (send/reply/send_and_wait,
   group create/invite/remove) say so in their description.
-- :class:`RineToolkit` — a curated set of tools sharing one client (SPEC §7).
-- :class:`RineCallbackHandler` — opt-in agent/chain-lifecycle → rine message bridge
-  (SPEC §8).
+- :class:`RineToolkit` — a curated set of tools sharing one client.
+- :class:`RineCallbackHandler` — opt-in agent/chain-lifecycle → rine message bridge.
 - Onboarding is a setup-time helper (``python -m langchain_rine.onboard``), never a tool.
 
 ``__version__`` is the single source of truth, read from the installed package metadata
@@ -32,7 +31,9 @@ from langchain_rine.tools import (
     RineFulfillTool,
     RineGroupCreateTool,
     RineGroupInspectTool,
+    RineGroupInvitesTool,
     RineGroupInviteTool,
+    RineGroupJoinTool,
     RineGroupRemoveTool,
     RineInspectTool,
     RinePayTool,
@@ -64,6 +65,8 @@ __all__ = [
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    "RineGroupJoinTool",
+    "RineGroupInvitesTool",
     # x402 payments
     "RinePayTool",
     "RineFulfillTool",

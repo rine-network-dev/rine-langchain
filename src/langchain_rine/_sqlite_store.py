@@ -1,7 +1,7 @@
-"""``SqliteThreadMap`` — the durable production :class:`ThreadMapStore` (D14/D20/D21).
+"""``SqliteThreadMap`` — the durable production :class:`ThreadMapStore`.
 
-The thread-map binding + the v0.3 **consumed-message-id journal** (exactly-once resume,
-D20), co-located in one sqlite db file (alongside the LangGraph ``SqliteSaver`` or a sibling
+The thread-map binding + the v0.3 **consumed-message-id journal** (exactly-once
+resume), co-located in one sqlite db file (alongside the LangGraph ``SqliteSaver`` or a sibling
 ``*.sqlite``). Two tables:
 
 - ``thread_map(handle, conversation_id, thread_id)`` — the ``(handle, conversation_id) ->
@@ -10,14 +10,14 @@ D20), co-located in one sqlite db file (alongside the LangGraph ``SqliteSaver`` 
   ids already resumed-and-recorded. ``is_consumed`` is the v0.3 exactly-once guard;
   ``mark_consumed`` records (act-then-record: after a successful resume, before the ack);
   ``drop_consumed`` self-cleans the entry after a successful ack so the journal stays bounded
-  to in-flight ids (D20). The journal stores **only ``message.id``**, never payload (I-2).
+  to in-flight ids. The journal stores **only ``message.id``**, never payload.
 
 Two connections share the file: a sync stdlib ``sqlite3`` connection (the sync resume path)
-and a **lazily-imported ``aiosqlite``** connection (the async ``_aresolve`` path — D21). The
+and a **lazily-imported ``aiosqlite``** connection (the async ``_aresolve`` path). The
 ``import aiosqlite`` is lazy (inside :meth:`_aconnection`), so a sync-only user never needs
 aiosqlite. ``PRAGMA journal_mode=WAL`` lets the sync conn, the aiosqlite conn, and the
 caller's ``SqliteSaver`` coexist without lock contention. SQL is shared between the two paths
-via the module-level ``_SQL_*`` constants — no duplicated SQL (I-1 import has no aiosqlite,
+via the module-level ``_SQL_*`` constants — no duplicated SQL (import has no aiosqlite,
 no network).
 """
 
@@ -67,12 +67,12 @@ _SQL_DROP_CONSUMED = (
 class SqliteThreadMap:
     """A stdlib-``sqlite3`` (+ lazy aiosqlite) :class:`ThreadMapStore` — production default.
 
-    The documented production default (D14): the ``thread_map`` binding + the ``consumed_message``
+    The documented production default: the ``thread_map`` binding + the ``consumed_message``
     journal both survive a process restart, so cross-process handoffs AND the exactly-once
-    guarantee (D20) hold across a crash. The sync surface (``get``/``put``/``delete``/``items`` +
+    guarantee hold across a crash. The sync surface (``get``/``put``/``delete``/``items`` +
     ``is_consumed``/``mark_consumed``/``drop_consumed``) uses the stdlib ``sqlite3`` conn; the
     async twins (``a*``) use a lazily-opened ``aiosqlite`` connection on the SAME db file so the
-    async resume path never blocks the event loop on stdlib sqlite (D21, fixes ``tm-4``).
+    async resume path never blocks the event loop on stdlib sqlite.
 
     The connection is opened lazily on first use and reused; ``check_same_thread=False`` lets the
     sync connection be shared by a single-threaded async poll loop and its event loop. ``WAL``
@@ -89,7 +89,7 @@ class SqliteThreadMap:
     # --- sync connection lifecycle ---------------------------------------------------------
 
     def _open(self) -> sqlite3.Connection:
-        """Open (once) and cache the sqlite connection with ``check_same_thread=False`` (tm-2).
+        """Open (once) and cache the sqlite connection with ``check_same_thread=False``.
 
         The single opener both ``_connection`` and ``setup`` route through, so a user who calls
         ``setup()`` first gets the SAME cross-thread-shareable connection as a lazy first use
@@ -139,7 +139,7 @@ class SqliteThreadMap:
         rows = self._connection().execute(_SQL_ITEMS).fetchall()
         return [((str(h), str(c)), str(t)) for h, c, t in rows]
 
-    # --- sync consumed journal (D20 exactly-once) ------------------------------------------
+    # --- sync consumed journal (exactly-once) ----------------------------------------------
 
     def is_consumed(self, handle: str, conversation_id: str, message_id: str) -> bool:
         """True iff ``message_id`` was already resumed-and-recorded for this conversation."""
@@ -162,13 +162,13 @@ class SqliteThreadMap:
         conn.execute(_SQL_DROP_CONSUMED, (handle, conversation_id, message_id))
         conn.commit()
 
-    # --- async connection lifecycle (lazy aiosqlite, D21) ----------------------------------
+    # --- async connection lifecycle (lazy aiosqlite) ---------------------------------------
 
     async def _aconnection(self) -> aiosqlite.Connection:
         """Open (once) the aiosqlite connection on the same db file; ensure tables + WAL.
 
         ``import aiosqlite`` is LAZY (here, not at module level), so a sync-only user of
-        ``SqliteThreadMap`` never needs aiosqlite installed (I-1). The first open creates the
+        ``SqliteThreadMap`` never needs aiosqlite installed. The first open creates the
         tables (idempotent) and sets WAL so the async conn coexists with the sync conn + the
         caller's ``SqliteSaver``.
         """
@@ -192,7 +192,7 @@ class SqliteThreadMap:
         await conn.execute(sql, params)
         await conn.commit()
 
-    # --- async thread-map + consumed journal (D21; SQL shared with the sync path) ----------
+    # --- async thread-map + consumed journal (SQL shared with the sync path) ---------------
 
     async def aget(self, handle: str, conversation_id: str) -> str | None:
         """Async twin of :meth:`get`."""

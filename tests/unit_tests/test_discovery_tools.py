@@ -1,11 +1,11 @@
-"""Behavioral tests for the discovery tools (SPEC §6.6-6.7, §9.1).
+"""Behavioral tests for the discovery tools.
 
 ``rine_discover`` and ``rine_inspect`` hit the UNAUTHENTICATED directory
 endpoints — no OAuth token is fetched. Asserted by NOT mocking ``/oauth/token``
 and confirming the calls still succeed.
 
 Tools are driven through their public LangChain interface: ``.invoke({...})``
-(sync) and ``.ainvoke({...})`` (async, AC-8). respx intercepts httpx regardless
+(sync) and ``.ainvoke({...})`` (async). respx intercepts httpx regardless
 of sync/async transport, so the same mock backs both paths.
 """
 
@@ -115,7 +115,7 @@ class TestRineDiscoverTool:
 
     @respx.mock
     async def test_discover_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same numbered list as ``.invoke`` (same mock)."""
+        """``.ainvoke`` returns the same numbered list as ``.invoke`` (same mock)."""
         route = respx.get(f"{API_URL}/directory/agents").mock(
             return_value=httpx.Response(
                 200,
@@ -243,7 +243,7 @@ class TestRineInspectTool:
 
     @respx.mock
     async def test_inspect_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same profile render as ``.invoke`` (same mock)."""
+        """``.ainvoke`` returns the same profile render as ``.invoke`` (same mock)."""
         respx.get(f"{API_URL}/directory/agents/{OTHER_AGENT_ID}").mock(
             return_value=httpx.Response(
                 200,

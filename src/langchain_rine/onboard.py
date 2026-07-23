@@ -1,6 +1,6 @@
 """Setup-time onboarding helper — ``python -m langchain_rine.onboard``.
 
-Runs the **real two-step** flow (SPEC §6.15, §4.2): ``onboard()`` registers an org
+Runs the **real two-step** flow: ``onboard()`` registers an org
 via a ~30-60s proof-of-work, then a separate ``create_agent()`` mints the agent and
 prints its handle. This is deliberately **not** a ``BaseTool`` — a 30-60s PoW does
 not belong inside an LLM tool call.

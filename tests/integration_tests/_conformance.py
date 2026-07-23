@@ -1,4 +1,4 @@
-"""Shared rig for the ``langchain-tests`` conformance subclasses (SPEC §13, PHASE0 §7).
+"""Shared rig for the ``langchain-tests`` conformance subclasses.
 
 Each rine tool ships two conformance subclasses — one ``ToolsUnitTests`` and one
 ``ToolsIntegrationTests`` (``langchain_tests.unit_tests`` / ``.integration_tests``).
@@ -22,7 +22,7 @@ implements :meth:`install_mocks` (the respx routes for that one tool). The Unit/
 subclasses are then just ``class …Unit(Spec, ToolsUnitTests)`` /
 ``class …Integration(Spec, ToolsIntegrationTests)``.
 
-v0.1 ships the string-return default (``response_format="content"``, D5): every tool
+v0.1 ships the string-return default (``response_format="content"``): every tool
 returns a ``str`` and never sets a ``content_and_artifact`` artifact, so the integration
 suite's artifact assertion never fires.
 """

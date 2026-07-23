@@ -1,4 +1,4 @@
-"""``langchain-tests`` conformance for the discovery tools (SPEC §6.6-6.7, §13).
+"""``langchain-tests`` conformance for the discovery tools.
 
 ``rine_discover`` + ``rine_inspect`` hit the unauthenticated directory endpoints (no token
 fetch). One ``ToolsUnitTests`` + one ``ToolsIntegrationTests`` subclass each; the

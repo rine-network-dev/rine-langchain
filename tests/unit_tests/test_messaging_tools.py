@@ -1,14 +1,14 @@
-"""Behavioral tests for the messaging tools (SPEC §6.1-6.5, §9.1).
+"""Behavioral tests for the messaging tools.
 
 Each tool is exercised through its public LangChain interface (``tool.invoke({...})``
-for sync, ``await tool.ainvoke({...})`` for async — AC-1); assertions are on the
+for sync, ``await tool.ainvoke({...})`` for async); assertions are on the
 human-readable return string and observable HTTP. Only the rine HTTP boundary is
 mocked (respx) — the SDK crypto/config/HTTP is real.
 
-The ciphertext-never-leaks invariant (REQ-07/REQ-09/REQ-10, AC-3/I-2) is asserted by
+The ciphertext-never-leaks invariant is asserted by
 encrypting a marker plaintext with a real HPKE round-trip and checking the raw
 ciphertext string never appears in any tool return — on BOTH the sync ``.invoke`` and
-async ``.ainvoke`` paths. Each ``_run`` test has an ``_arun`` parity twin (AC-8, D3)
+async ``.ainvoke`` paths. Each ``_run`` test has an ``_arun`` parity twin
 driving ``.ainvoke({...})`` against the SAME respx mock and asserting the SAME string.
 ``asyncio_mode = "auto"`` (pyproject) means async tests need no per-test marker.
 """
@@ -36,10 +36,12 @@ from ..conftest import (
     API_URL,
     CONVERSATION_ID,
     GROUP_HANDLE,
+    GROUP_ID,
     MESSAGE_ID,
     OTHER_AGENT_ID,
     OTHER_HANDLE,
     REPLY_ID,
+    establish_mls_group_state,
     group_payload,
     hpke_self_encrypt,
     message_payload,
@@ -83,9 +85,9 @@ class TestRineSendTool:
 
     @respx.mock
     async def test_send_arun_matches_run(self, config_dir, other_keys):
-        """AC-8: ``.ainvoke`` returns the same confirmation as ``.invoke`` (same mock).
+        """``.ainvoke`` returns the same confirmation as ``.invoke`` (same mock).
 
-        Also asserts the I-2 ciphertext-absence invariant holds on the async path.
+        Also asserts the ciphertext-absence invariant holds on the async path.
         """
         mock_token()
         mock_agents()
@@ -101,7 +103,7 @@ class TestRineSendTool:
         assert f"Sent message {MESSAGE_ID}" in out
         assert OTHER_HANDLE in out
         assert CONVERSATION_ID in out
-        assert "hello there" not in out  # I-2 holds on the async path too
+        assert "hello there" not in out  # ciphertext-absence holds on the async path too
 
     @respx.mock
     def test_send_auto_hpke_encrypts_body_on_the_wire(self, config_dir, other_keys):
@@ -163,7 +165,7 @@ class TestRineSendTool:
 
     @respx.mock
     def test_send_to_missing_agent_returns_not_found_string(self, config_dir):
-        """A 404 from the recipient-key fetch maps to the §6.14 not-found string."""
+        """A 404 from the recipient-key fetch maps to the not-found string."""
         mock_token()
         mock_agents()
         mock_webfinger()
@@ -177,44 +179,67 @@ class TestRineSendTool:
         assert "agent not found" in out
 
     @respx.mock
-    def test_send_to_mls_group_returns_honest_ceiling_string(self, config_dir):
-        """A send to a TS-created MLS group surfaces the MLS ceiling, never silently fails."""
+    def test_send_to_mls_group_posts_a_real_mls_message(self, config_dir):
+        """A send to a PQ MLS group genuinely encrypts and posts an ``mls-v1`` message.
+
+        The connector operates MLS groups now: with local state established (a real
+        founder admitted this agent), the send encrypts through the MLS core and hits
+        ``POST /messages`` — no ceiling, no silent failure.
+        """
         mock_token()
         mock_agents()
+        establish_mls_group_state(config_dir)
         respx.get(f"{API_URL}/groups").mock(
             return_value=httpx.Response(
                 200,
                 json={"items": [group_payload(mls_group_id="mls-abc", mls_pending=False)]},
             )
         )
+        send_route = respx.post(f"{API_URL}/messages").mock(
+            return_value=httpx.Response(
+                200, json={**sent_message_payload(), "group_id": GROUP_ID, "to_agent_id": None}
+            )
+        )
 
         out = _send_tool(config_dir).invoke({"to": GROUP_HANDLE, "body": "team update"})
 
-        assert "MLS" in out
-        assert "sender-key" in out
+        assert send_route.called
+        # An MLS group send posts a to_handle (the group), not a 1:1 to_agent_id.
+        body = json.loads(send_route.calls[0].request.content)
+        assert body["to_handle"] == GROUP_HANDLE
+        assert body["encryption_version"] == EncryptionVersion.MLS_V1
+        assert "team update" not in send_route.calls[0].request.content.decode()  # ciphertext only
+        assert f"Sent message {MESSAGE_ID}" in out
+        assert GROUP_HANDLE in out
 
     @respx.mock
-    async def test_send_to_hash_handle_routes_through_group_path(self, config_dir):
-        """AC-4: a ``#``-prefixed target routes through the group path (queries /groups).
+    async def test_send_to_hash_handle_routes_through_mls_group_path(self, config_dir):
+        """A ``#``-prefixed target routes through the real MLS group path (queries /groups).
 
         ``rine_send`` is the group send tool too — a ``#`` handle drives the SDK's group
-        resolution (GET /groups), here surfacing the honest MLS ceiling for a TS group.
+        resolution (GET /groups) and, with local MLS state, a genuine ``mls-v1`` send.
         Proven on the async path so the routing holds under ``.ainvoke`` as well.
         """
         mock_token()
         mock_agents()
+        establish_mls_group_state(config_dir)
         groups_route = respx.get(f"{API_URL}/groups").mock(
             return_value=httpx.Response(
                 200,
                 json={"items": [group_payload(mls_group_id="mls-abc", mls_pending=False)]},
             )
         )
+        send_route = respx.post(f"{API_URL}/messages").mock(
+            return_value=httpx.Response(
+                200, json={**sent_message_payload(), "group_id": GROUP_ID, "to_agent_id": None}
+            )
+        )
 
         out = await _send_tool(config_dir).ainvoke({"to": GROUP_HANDLE, "body": "team update"})
 
         assert groups_route.called  # group routing engaged, not the 1:1 /messages path
-        assert "MLS" in out
-        assert "sender-key" in out
+        assert send_route.called
+        assert f"Sent message {MESSAGE_ID}" in out
 
     @respx.mock
     def test_send_never_raises_on_error(self, config_dir):
@@ -275,9 +300,9 @@ class TestRineSendAndWaitTool:
 
     @respx.mock
     async def test_send_and_wait_arun_matches_run(self, config_dir, other_keys):
-        """AC-8: ``.ainvoke`` returns the same plaintext reply as ``.invoke`` (same mock).
+        """``.ainvoke`` returns the same plaintext reply as ``.invoke`` (same mock).
 
-        Carries the async I-2 ciphertext-absence assertion on the reply path.
+        Carries the async ciphertext-absence assertion on the reply path.
         """
         mock_token()
         mock_agents()
@@ -298,7 +323,7 @@ class TestRineSendAndWaitTool:
         assert f"Reply from {OTHER_HANDLE}" in out
         assert "ack: done" in out
         assert "(signature verified)" in out
-        assert reply_ct not in out  # I-2 on the async reply path
+        assert reply_ct not in out  # ciphertext-absence on the async reply path
 
     @respx.mock
     def test_send_and_wait_unverifiable_reply_renders_signature_unverifiable(
@@ -356,14 +381,14 @@ class TestRineSendAndWaitTool:
         assert "no reply within 5s" in out
 
     def test_send_and_wait_to_group_returns_one_to_one_only_string(self, config_dir):
-        """AC-4: group handle trips the SDK's typed UnsupportedTargetError (caught pre-request)."""
+        """Group handle trips the SDK's typed UnsupportedTargetError (caught pre-request)."""
         out = RineSendAndWaitTool(config_dir=config_dir, api_url=API_URL).invoke(
             {"to": GROUP_HANDLE, "body": "nope"}
         )
         assert out == "send_and_wait is 1:1 only; use rine_send for groups."
 
     async def test_send_and_wait_to_group_arun_returns_one_to_one_only_string(self, config_dir):
-        """AC-4/AC-8: the 1:1-only guard holds identically on the async path."""
+        """The 1:1-only guard holds identically on the async path."""
         out = await RineSendAndWaitTool(config_dir=config_dir, api_url=API_URL).ainvoke(
             {"to": GROUP_HANDLE, "body": "nope"}
         )
@@ -429,16 +454,16 @@ class TestRineCheckInboxTool:
 
         assert "inbox hello" in out
         assert "1 new message" in out
-        # status=new must be forwarded (P0-1)
+        # status=new must be forwarded
         assert b"status=new" in inbox_route.calls[0].request.url.query
         # ciphertext invariant
         assert ciphertext not in out
 
     @respx.mock
     async def test_check_inbox_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same decrypted list as ``.invoke`` (same mock).
+        """``.ainvoke`` returns the same decrypted list as ``.invoke`` (same mock).
 
-        Carries the async I-2 ciphertext-absence assertion on the inbox path.
+        Carries the async ciphertext-absence assertion on the inbox path.
         """
         mock_token()
         mock_agents()
@@ -458,7 +483,7 @@ class TestRineCheckInboxTool:
         assert "inbox hello" in out
         assert "1 new message" in out
         assert b"status=new" in inbox_route.calls[0].request.url.query
-        assert ciphertext not in out  # I-2 on the async inbox path
+        assert ciphertext not in out  # ciphertext-absence on the async inbox path
 
     @respx.mock
     def test_check_inbox_marks_decryptable_messages_delivered(self, config_dir):
@@ -486,7 +511,7 @@ class TestRineCheckInboxTool:
         """L5: a transient ack (mark_delivered) failure must NOT lose the read.
 
         The message is still returned, a WARNING is logged, and a note is appended so
-        the LLM knows the mail may reappear (SPEC §6.3 best-effort promise).
+        the LLM knows the mail may reappear (best-effort promise).
         """
         mock_token()
         mock_agents()
@@ -507,7 +532,7 @@ class TestRineCheckInboxTool:
 
         # The read is NOT lost despite the failed ack.
         assert "still here" in out
-        # The LLM is told these may reappear (the §6.3 honesty note).
+        # The LLM is told these may reappear (the honesty note).
         assert "could not mark delivered" in out
         # And the failure is observable at WARNING, not silently swallowed.
         assert any("mark_delivered failed" in r.message for r in caplog.records), (
@@ -532,7 +557,7 @@ class TestRineCheckInboxTool:
         assert not ack.called
 
     def test_check_inbox_client_construction_error_maps_to_string(self, config_dir, monkeypatch):
-        """I-3: a client-construction-time raise is mapped via _format_error, never escapes.
+        """A client-construction-time raise is mapped via _format_error, never escapes.
 
         The client is built INSIDE the try block, so a constructor raise (e.g. a
         ConfigError reading credentials on a non-root host) returns a formatted string
@@ -552,7 +577,7 @@ class TestRineCheckInboxTool:
     async def test_check_inbox_arun_client_construction_error_maps_to_string(
         self, config_dir, monkeypatch
     ):
-        """I-3 on the async path: an async-client constructor raise is mapped, not raised."""
+        """On the async path: an async-client constructor raise is mapped, not raised."""
         from rine.errors import ConfigError
 
         def _boom(**_kwargs):
@@ -621,9 +646,9 @@ class TestRineReadTool:
 
     @respx.mock
     async def test_read_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same plaintext + verification as ``.invoke``.
+        """``.ainvoke`` returns the same plaintext + verification as ``.invoke``.
 
-        Carries the async I-2 ciphertext-absence assertion on the read path.
+        Carries the async ciphertext-absence assertion on the read path.
         """
         mock_token()
         mock_agents()
@@ -647,7 +672,7 @@ class TestRineReadTool:
 
         assert "read me" in out
         assert "verification: signature verified" in out
-        assert ciphertext not in out  # I-2 on the async read path
+        assert ciphertext not in out  # ciphertext-absence on the async read path
 
     @respx.mock
     def test_read_unverifiable_message_renders_signature_unverifiable(self, config_dir):
@@ -682,7 +707,13 @@ class TestRineReadTool:
         assert ciphertext not in out
 
     @respx.mock
-    def test_read_mls_message_surfaces_decrypt_error_not_ciphertext(self, config_dir):
+    def test_read_mls_message_naming_no_group_surfaces_structured_error(self, config_dir):
+        """An ``mls-v1`` message that names no group surfaces the SDK's structured error.
+
+        The SDK raises (a malformed message, not a missing key) rather than returning a
+        soft decrypt_error, so the connector surfaces that exact guidance — never the
+        raw ciphertext.
+        """
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
@@ -699,8 +730,8 @@ class TestRineReadTool:
             {"message_id": MESSAGE_ID}
         )
 
-        assert "MLS" in out
-        assert "[unreadable]" in out
+        assert "mls-v1 message names no group" in out
+        assert "malformed message, not a missing key" in out
         assert "Q0lQSEVSVEVYVA==" not in out
 
     @respx.mock
@@ -720,7 +751,7 @@ class TestRineReadTool:
 
 
 # =====================================================================
-# RineThreadTool (REQ-TOOL-01)
+# RineThreadTool
 # =====================================================================
 
 
@@ -770,7 +801,7 @@ def _thread_page(received_ct):
 class TestRineThreadTool:
     @respx.mock
     def test_thread_renders_role_tagged_transcript(self, config_dir):
-        """REQ-TOOL-01: rine_thread returns the decrypted, role-tagged transcript."""
+        """rine_thread returns the decrypted, role-tagged transcript."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
@@ -787,11 +818,11 @@ class TestRineThreadTool:
         )
 
         assert f"[received] {OTHER_HANDLE}: peer turn one" in out
-        assert received_ct not in out  # I-2: ciphertext never surfaces
+        assert received_ct not in out  # ciphertext never surfaces
 
     @respx.mock
     async def test_thread_arun_matches_run(self, config_dir):
-        """AC-8: ``.ainvoke`` returns the same transcript as ``.invoke`` (same mock)."""
+        """``.ainvoke`` returns the same transcript as ``.invoke`` (same mock)."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
@@ -825,7 +856,7 @@ class TestRineThreadTool:
 
     @respx.mock
     def test_thread_renders_sent_received_and_unavailable_rows(self, config_dir):
-        """REQ-TOOL-01 AC: both-sided transcript renders all row kinds.
+        """Both-sided transcript renders all row kinds.
 
         ``[sent] you``, ``[received]``, and an ``[unavailable]`` passthrough all
         render via ``_render_thread_line``.
@@ -856,7 +887,7 @@ class TestRineThreadTool:
         assert "[sent] you: my turn one" in out
         assert f"[received] {OTHER_HANDLE}: peer turn one" in out
         assert "[sent] you: [unavailable]" in out
-        assert sent_ct not in out  # I-2: ciphertext never surfaces
+        assert sent_ct not in out  # ciphertext never surfaces
         assert received_ct not in out
 
 
@@ -898,7 +929,7 @@ class TestRineReplyTool:
 
     @respx.mock
     async def test_reply_arun_matches_run(self, config_dir, other_keys):
-        """AC-8: ``.ainvoke`` returns the same reply-id confirmation as ``.invoke``."""
+        """``.ainvoke`` returns the same reply-id confirmation as ``.invoke``."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(

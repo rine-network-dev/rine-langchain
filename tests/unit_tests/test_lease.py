@@ -1,4 +1,4 @@
-"""Behavioral tests for the advisory single-consumer lease (D22, ``_lease.py``).
+"""Behavioral tests for the advisory single-consumer lease (``_lease.py``).
 
 Exercised through the :class:`Lease` public surface (``acquire`` / ``release``). Two
 :class:`SqliteLease` owners on the SAME db file + ``inbox_key`` model two ``PollDriver`` processes
@@ -34,7 +34,7 @@ class TestSqliteLease:
         assert lease.acquire(30.0) is True
 
     def test_second_owner_is_refused_while_first_lives(self, tmp_path):
-        """D22: two owners on the same db+key → first wins, second backs off (False)."""
+        """Two owners on the same db+key → first wins, second backs off (False)."""
         db = _db(tmp_path)
         first = SqliteLease(db, INBOX)
         second = SqliteLease(db, INBOX)
@@ -57,7 +57,7 @@ class TestSqliteLease:
         assert b.acquire(30.0) is True  # different key → no contention
 
     def test_expired_lease_is_taken_over(self, tmp_path):
-        """D22: once the holder's ttl elapses, another owner may take the lease over.
+        """Once the holder's ttl elapses, another owner may take the lease over.
 
         Deterministic: the first lease is granted with ttl=0 (expires immediately); a sub-ms sleep
         guarantees ``time.time()`` advances past the grant instant so the takeover sees it expired.
@@ -71,7 +71,7 @@ class TestSqliteLease:
         assert taker.acquire(30.0) is True  # the expired lease is taken over
 
     def test_release_frees_the_lease_for_another_owner(self, tmp_path):
-        """D22: a clean release lets the next owner acquire immediately (no ttl wait)."""
+        """A clean release lets the next owner acquire immediately (no ttl wait)."""
         db = _db(tmp_path)
         first = SqliteLease(db, INBOX)
         second = SqliteLease(db, INBOX)
@@ -119,7 +119,7 @@ class TestSqliteLease:
         assert lease.acquire(30.0) is True  # reopens the connection lazily and renews
 
     def test_acquire_race_against_held_write_lock_returns_false_not_raises(self, tmp_path):
-        """D22: a true acquire RACE degrades to ``False`` quickly, never raises (lease-3).
+        """A true acquire RACE degrades to ``False`` quickly, never raises.
 
         Models owner-B calling ``acquire`` while owner-A is mid-transaction (between its own
         ``BEGIN IMMEDIATE`` and ``commit``): B's ``BEGIN IMMEDIATE`` cannot grab the write lock.
@@ -151,5 +151,5 @@ class TestSqliteLease:
             blocker.rollback()
             blocker.close()
 
-        assert result is False  # contention surfaced as a clean False (D22), not an exception
+        assert result is False  # contention surfaced as a clean False, not an exception
         assert elapsed < 2.0  # bounded by busy_timeout (~200 ms), not the 5 s stdlib default

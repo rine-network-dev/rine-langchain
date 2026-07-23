@@ -1,4 +1,4 @@
-"""``langchain-tests`` conformance for the four group tools (SPEC §6.8-6.12, §13).
+"""``langchain-tests`` conformance for the four group tools.
 
 create / invite / remove / inspect. One ``ToolsUnitTests`` + one ``ToolsIntegrationTests``
 subclass each; the integration suite invokes against respx-mocked ``/groups`` routes. invite,

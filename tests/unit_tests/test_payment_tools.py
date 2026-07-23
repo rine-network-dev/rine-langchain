@@ -9,7 +9,10 @@ payee ladder (``rine.x402.fulfill``) reaches an external facilitator.
 Invariants asserted here: the typed ``rine_pay`` status vocabulary is reused verbatim;
 the auto-pay gate refuses WITHOUT debiting; a repeat pay is ``already-paid``; the
 cleartext marker on the wire stays ``{status, rail}``-only (never the amount); a failed
-verification is a business outcome (a failure receipt), not a crash.
+verification is a business outcome (a failure receipt), not a crash; and the payee
+settles only against a quote IT issued — a fulfil therefore also serves the quote the
+payment's signed ref names, and a payment carrying no ref is refused before the
+facilitator is contacted at all.
 """
 
 from __future__ import annotations
@@ -20,18 +23,22 @@ from typing import Any
 import httpx
 import respx
 from rine._constants import MessageType
+from rine._crypto.dm_envelope import RecipientKeys
 from rine._crypto.keys import load_agent_keys
 from rine._crypto.message import encrypt_message
 from rine._crypto.wallet import save_wallet_key
 from rine.x402 import PaymentPolicy, save_policy
+from rine.x402.types import X402_QUOTE_REF_KEY
 
 from langchain_rine import RineFulfillTool, RinePayTool
 
 from ..conftest import (
     AGENT_ID,
     API_URL,
+    MESSAGE_ID,
     OTHER_AGENT_ID,
     REPLY_ID,
+    hpke_self_encrypt,
     message_payload,
     mock_agents,
     mock_recipient_keys,
@@ -48,11 +55,16 @@ def _seal(config_dir: str, payload: dict[str, Any]) -> str:
     ``/agents/{OTHER_AGENT_ID}/keys`` via ``mock_recipient_keys``). Requires the
     ``other_keys`` fixture (peer keys on disk).
     """
-    own_pk = load_agent_keys(config_dir, AGENT_ID).encryption.public_key
-    return encrypt_message(config_dir, OTHER_AGENT_ID, own_pk, payload).encrypted_payload
+    # Classical on purpose: the recipient's ML-KEM half is left out so this helper
+    # keeps producing `hpke-v1`, which is what the fixtures around it declare.
+    own = load_agent_keys(config_dir, AGENT_ID)
+    recipient = RecipientKeys(encryption=own.encryption.public_key)
+    return encrypt_message(config_dir, OTHER_AGENT_ID, recipient, payload).encrypted_payload
 
 
-QUOTE_ID = "cccccccc-dddd-eeee-ffff-000000000001"  # == MESSAGE_ID (the fetched message)
+# The payee-issued quote a received payment answers — a DIFFERENT message from the
+# payment itself, which is what MESSAGE_ID (the message a tool is pointed at) holds.
+QUOTE_ID = "cccccccc-dddd-eeee-ffff-000000000003"
 FAC_URL = "https://fac.local"
 
 BASE = "eip155:8453"
@@ -105,13 +117,13 @@ def _install_wallet(config_dir: str, *, policy: bool = True) -> None:
 def _mock_quote(config_dir: str, amount: str = "500000", *, msg_type: str | None = None) -> None:
     """Mock ``GET /messages/{id}`` → an x402 quote sealed to the payer (self-decryptable)."""
     ciphertext = _seal(config_dir, _payment_required(amount))
-    respx.get(f"{API_URL}/messages/{QUOTE_ID}").mock(
+    respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
         return_value=httpx.Response(
             200,
             json=message_payload(
                 encryption_version="hpke-v1",
                 encrypted_payload=ciphertext,
-                msg_id=QUOTE_ID,
+                msg_id=MESSAGE_ID,
                 from_agent_id=OTHER_AGENT_ID,  # payee = quote sender
                 to_agent_id=AGENT_ID,  # payer = us
                 msg_type=msg_type or MessageType.X402_PAYMENT_REQUIRED,
@@ -122,7 +134,7 @@ def _mock_quote(config_dir: str, amount: str = "500000", *, msg_type: str | None
 
 def _mock_reply() -> respx.Route:
     """Mock ``POST /messages/{id}/reply`` → a sent message (id == REPLY_ID)."""
-    return respx.post(f"{API_URL}/messages/{QUOTE_ID}/reply").mock(
+    return respx.post(f"{API_URL}/messages/{MESSAGE_ID}/reply").mock(
         return_value=httpx.Response(200, json={**sent_message_payload(), "id": REPLY_ID})
     )
 
@@ -147,7 +159,7 @@ class TestRinePayHappyPath:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert route.called
         assert "status: payment-submitted" in out
@@ -164,7 +176,7 @@ class TestRinePayHappyPath:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         body = json.loads(route.calls[0].request.content)
         assert body["type"] == MessageType.X402_PAYMENT
@@ -180,7 +192,7 @@ class TestRinePayHappyPath:
         _mock_quote(config_dir, amount="500000")
         route = _mock_reply()
 
-        _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         body = json.loads(route.calls[0].request.content)
         marker = body["metadata"]["rine.x402"]
@@ -198,14 +210,14 @@ class TestRinePayHappyPath:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        _pay_tool(config_dir).invoke({"message_id": QUOTE_ID, "emit_marker": False})
+        _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID, "emit_marker": False})
 
         body = json.loads(route.calls[0].request.content)
         assert "metadata" not in body or body["metadata"] in ({}, None)
 
     @respx.mock
     async def test_pay_arun_matches_run(self, config_dir, other_keys):
-        """AC-8: the async path submits the payment identically."""
+        """The async path submits the payment identically."""
         mock_token()
         mock_agents()
         mock_recipient_keys(config_dir)
@@ -213,7 +225,7 @@ class TestRinePayHappyPath:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        out = await _pay_tool(config_dir).ainvoke({"message_id": QUOTE_ID})
+        out = await _pay_tool(config_dir).ainvoke({"message_id": MESSAGE_ID})
 
         assert route.called
         assert "status: payment-submitted" in out
@@ -236,7 +248,7 @@ class TestRinePayRefusals:
         _mock_quote(config_dir, msg_type=MessageType.TASK_REQUEST)
         route = _mock_reply()
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert "status: not-payment-required" in out
         assert not route.called
@@ -255,7 +267,7 @@ class TestRinePayRefusals:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert "status: no-wallet" in out
         assert not route.called
@@ -270,7 +282,7 @@ class TestRinePayRefusals:
         _mock_quote(config_dir)
         route = _mock_reply()
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert "status: policy-refused" in out
         assert not route.called
@@ -285,13 +297,13 @@ class TestRinePayRefusals:
         _mock_quote(config_dir, amount="2000000")  # 2.00 EURC > 1.00 threshold
         route = _mock_reply()
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID, "auto_pay": True})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID, "auto_pay": True})
 
         assert "status: above-auto-pay-threshold" in out
         assert not route.called
         # No debit occurred: a subsequent EXPLICIT pay of the same quote still succeeds
         # (the refusal never reserved, so this is not blocked as already-paid).
-        out2 = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out2 = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
         assert "status: payment-submitted" in out2
 
     @respx.mock
@@ -304,8 +316,8 @@ class TestRinePayRefusals:
         _mock_quote(config_dir)
         _mock_reply()
 
-        first = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
-        second = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        first = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
+        second = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert "status: payment-submitted" in first
         assert "status: already-paid" in second
@@ -320,8 +332,8 @@ class TestRinePayRefusals:
         _mock_quote(config_dir)
         _mock_reply()
 
-        _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
-        again = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID, "allow_repay": True})
+        _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
+        again = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID, "allow_repay": True})
 
         assert "status: payment-submitted" in again
 
@@ -331,11 +343,11 @@ class TestRinePayRefusals:
         mock_token()
         mock_agents()
         _install_wallet(config_dir)
-        respx.get(f"{API_URL}/messages/{QUOTE_ID}").mock(
+        respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(404, json={"detail": "message not found"})
         )
 
-        out = _pay_tool(config_dir).invoke({"message_id": QUOTE_ID})
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
 
         assert isinstance(out, str)
         assert "Not found" in out
@@ -346,14 +358,26 @@ class TestRinePayRefusals:
 # =====================================================================
 
 SIGNED_PAYER = "0xSignerFromAuthorization"
-PAYMENT_PAYLOAD = {
-    "x402Version": 2,
-    "accepted": _accepts()[0],
-    "payload": {
-        "signature": "0xsig",
-        "authorization": {"from": SIGNED_PAYER, "to": PAY_TO, "value": "500000"},
-    },
-}
+
+
+def _payment_payload(*, quote_ref: str | None = QUOTE_ID) -> dict[str, Any]:
+    """A verbatim x402 ``PaymentPayload`` (what an ``x402_payment`` body decrypts to).
+
+    ``extensions[X402_QUOTE_REF_KEY]`` names the payee-issued quote this payment
+    answers: the payee reloads THAT quote and settles against its terms, never this
+    echoed ``accepted`` block. ``quote_ref=None`` models a payer that stamped no ref.
+    """
+    return {
+        "x402Version": 2,
+        "accepted": _accepts()[0],
+        "payload": {
+            "signature": "0xsig",
+            "authorization": {"from": SIGNED_PAYER, "to": PAY_TO, "value": "500000"},
+        },
+        "extensions": {X402_QUOTE_REF_KEY: quote_ref} if quote_ref else {},
+    }
+
+
 SETTLED = {
     "success": True,
     "transaction": "0xhash",
@@ -363,20 +387,51 @@ SETTLED = {
 }
 
 
-def _mock_payment(config_dir: str, *, msg_type: str | None = None) -> None:
+def _mock_payment(
+    config_dir: str, *, msg_type: str | None = None, quote_ref: str | None = QUOTE_ID
+) -> None:
     """Mock ``GET /messages/{id}`` → an x402_payment sealed to the payee (self-decryptable)."""
-    ciphertext = _seal(config_dir, PAYMENT_PAYLOAD)
-    respx.get(f"{API_URL}/messages/{QUOTE_ID}").mock(
+    ciphertext = _seal(config_dir, _payment_payload(quote_ref=quote_ref))
+    respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
         return_value=httpx.Response(
             200,
             json=message_payload(
                 encryption_version="hpke-v1",
                 encrypted_payload=ciphertext,
-                msg_id=QUOTE_ID,
+                msg_id=MESSAGE_ID,
                 from_agent_id=OTHER_AGENT_ID,  # payer = message sender
                 to_agent_id=AGENT_ID,  # payee = us
                 msg_type=msg_type or MessageType.X402_PAYMENT,
             ),
+        )
+    )
+
+
+def _mock_referenced_quote(config_dir: str) -> None:
+    """Mock ``GET /messages/{QUOTE_ID}`` → the payee's OWN quote, as its sender sees it.
+
+    A payee re-reading a message it sent gets ``direction: "sent"`` plus the
+    ``self_encrypted_payload`` sealed to its own key, so the quote resolves only through
+    the self-seal — the ``encrypted_payload`` here is the payer's copy and stays opaque.
+    ``AGENT_ID``'s keys are served too because the payee verifies the (own) sender
+    signature on that quote before trusting a byte of it.
+    """
+    mock_recipient_keys(config_dir, AGENT_ID)
+    respx.get(f"{API_URL}/messages/{QUOTE_ID}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                **message_payload(
+                    encryption_version="hpke-v1",
+                    encrypted_payload="ZHVtbXk=",  # payer's copy — unreadable to the payee
+                    msg_id=QUOTE_ID,
+                    from_agent_id=AGENT_ID,  # the payee issued this quote
+                    to_agent_id=OTHER_AGENT_ID,  # the payer it was quoted to
+                    msg_type=MessageType.X402_PAYMENT_REQUIRED,
+                ),
+                "direction": "sent",
+                "self_encrypted_payload": hpke_self_encrypt(config_dir, _payment_required()),
+            },
         )
     )
 
@@ -399,10 +454,11 @@ class TestRineFulfill:
             return_value=httpx.Response(200, json=SETTLED)
         )
         _mock_payment(config_dir)
+        _mock_referenced_quote(config_dir)
         reply = _mock_reply()
 
         out = _fulfill_tool(config_dir).invoke(
-            {"message_id": QUOTE_ID, "facilitator_url": FAC_URL}
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
         )
 
         assert settle.called and reply.called
@@ -421,9 +477,10 @@ class TestRineFulfill:
         )
         respx.post(f"{FAC_URL}/settle").mock(return_value=httpx.Response(200, json=SETTLED))
         _mock_payment(config_dir)
+        _mock_referenced_quote(config_dir)
         reply = _mock_reply()
 
-        _fulfill_tool(config_dir).invoke({"message_id": QUOTE_ID, "facilitator_url": FAC_URL})
+        _fulfill_tool(config_dir).invoke({"message_id": MESSAGE_ID, "facilitator_url": FAC_URL})
 
         body = json.loads(reply.calls[0].request.content)
         marker = body["metadata"]["rine.x402"]
@@ -443,16 +500,41 @@ class TestRineFulfill:
         )
         settle = respx.post(f"{FAC_URL}/settle").mock(return_value=httpx.Response(200, json={}))
         _mock_payment(config_dir)
+        _mock_referenced_quote(config_dir)
         reply = _mock_reply()
 
         out = _fulfill_tool(config_dir).invoke(
-            {"message_id": QUOTE_ID, "facilitator_url": FAC_URL}
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
         )
 
         assert not settle.called  # settle skipped on invalid
         assert reply.called
         assert "status: payment-failed" in out
         assert "insufficient_funds" in out
+
+    @respx.mock
+    def test_fulfill_without_quote_ref_refuses_before_the_facilitator(
+        self, config_dir, other_keys
+    ):
+        """Fail closed: a payment bound to no payee-issued quote never reaches the facilitator."""
+        mock_token()
+        mock_agents()
+        mock_recipient_keys(config_dir)
+        verify = respx.post(f"{FAC_URL}/verify")
+        settle = respx.post(f"{FAC_URL}/settle")
+        _mock_payment(config_dir, quote_ref=None)
+        reply = _mock_reply()
+
+        out = _fulfill_tool(config_dir).invoke(
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
+        )
+
+        assert not verify.called and not settle.called  # no funds move, nothing asked
+        assert reply.called  # the payer still reaches a terminal state
+        assert "status: payment-failed" in out
+        assert "no-quote" in out
+        marker = json.loads(reply.calls[0].request.content)["metadata"]["rine.x402"]
+        assert marker["status"] == "payment-failed"
 
     @respx.mock
     def test_fulfill_wrong_message_type_returns_error_string_no_facilitator(
@@ -466,7 +548,7 @@ class TestRineFulfill:
         _mock_payment(config_dir, msg_type=MessageType.TASK_REQUEST)
 
         out = _fulfill_tool(config_dir).invoke(
-            {"message_id": QUOTE_ID, "facilitator_url": FAC_URL}
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
         )
 
         assert not verify.called
@@ -474,7 +556,7 @@ class TestRineFulfill:
 
     @respx.mock
     async def test_fulfill_arun_matches_run(self, config_dir, other_keys):
-        """AC-8: the async path settles and reports payment-completed identically."""
+        """The async path settles and reports payment-completed identically."""
         mock_token()
         mock_agents()
         mock_recipient_keys(config_dir)
@@ -483,10 +565,11 @@ class TestRineFulfill:
         )
         respx.post(f"{FAC_URL}/settle").mock(return_value=httpx.Response(200, json=SETTLED))
         _mock_payment(config_dir)
+        _mock_referenced_quote(config_dir)
         reply = _mock_reply()
 
         out = await _fulfill_tool(config_dir).ainvoke(
-            {"message_id": QUOTE_ID, "facilitator_url": FAC_URL}
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
         )
 
         assert reply.called

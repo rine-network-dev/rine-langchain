@@ -1,11 +1,14 @@
-"""Sender-key group tools (SPEC §6.8, §6.10-6.12).
+"""Group tools.
 
-Four ``BaseTool``s over ``client.groups``: create, invite, remove, inspect.
-Group **send/read are NOT here** — they ride ``#``-prefix routing through the
-messaging tools (SPEC §6.9). ``mls_enabled`` is never exposed: the SDK hard-codes
-``mls_enabled=False`` on create, so a LangChain agent only ever owns sender-key
-groups. ``RineGroupInspectTool`` surfaces the MLS latches so an operator can
-self-diagnose an unreadable (TS-created MLS) group.
+Six ``BaseTool``s over ``client.groups``: create, invite, remove, inspect, join,
+invites. Group **send/read are NOT here** — they ride ``#``-prefix routing through
+the messaging tools. ``mls_enabled`` is never exposed: the SDK picks the encryption,
+defaulting new groups to post-quantum MLS (X-Wing); ``RineGroupInspectTool`` reports
+which scheme a group uses. Both MLS and sender-key groups are end-to-end encrypted
+and readable/postable from here. ``RineGroupJoinTool`` is how an agent accepts an
+invite it discovered via ``RineGroupInvitesTool`` (agent-scoped, across all groups);
+joining installs the agent's local MLS state so it can immediately read and post
+(see ``SyncGroups.join``/``AsyncGroups.join``).
 
 Each tool implements both ``_run`` (sync ``SyncRineClient``) and ``_arun`` (async
 ``RineClient``): the async body is the sync body with ``_get_client`` →
@@ -17,7 +20,14 @@ directly.
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from rine import GroupRead, NotFoundError, is_uuid, normalize_handle
+from rine import (
+    GroupRead,
+    JoinRequestRead,
+    JoinResult,
+    NotFoundError,
+    is_uuid,
+    normalize_handle,
+)
 
 from langchain_rine._client import (
     AsyncCallbackManagerForToolRun,
@@ -25,7 +35,7 @@ from langchain_rine._client import (
     CallbackManagerForToolRun,
     _format_error,
 )
-from langchain_rine._format import render_group
+from langchain_rine._format import group_encryption_label, render_group
 
 
 class RineGroupCreateInput(BaseModel):
@@ -41,13 +51,14 @@ class RineGroupCreateInput(BaseModel):
 
 
 class RineGroupCreateTool(BaseRineTool):
-    """Create a new sender-key-encrypted coordination group."""
+    """Create a new end-to-end-encrypted coordination group (post-quantum MLS by default)."""
 
     name: str = "rine_group_create"
     description: str = (
-        "Create a new encrypted coordination group (sender-key E2EE). Performs a real, "
-        "irreversible network action. Your agent owns and administers the group. The group "
-        "is always sender-key (MLS is not exposed; the Python side cannot operate MLS groups)."
+        "Create a new end-to-end-encrypted coordination group. Performs a real, "
+        "irreversible network action. Your agent owns and administers the group. New "
+        "groups are post-quantum MLS (X-Wing) by default; open-enrollment groups use "
+        "sender keys. Either way your agent can read and post here."
     )
     args_schema: type[BaseModel] = RineGroupCreateInput
 
@@ -70,7 +81,7 @@ class RineGroupCreateTool(BaseRineTool):
         except Exception as err:  # noqa: BLE001 — surface as a tool message, never crash
             return _format_error(err)
         return (
-            f"Created group {group.handle} (id {group.id}, sender-key E2EE, "
+            f"Created group {group.handle} (id {group.id}, {group_encryption_label(group)}, "
             f"enrollment {group.enrollment_policy})."
         )
 
@@ -93,7 +104,7 @@ class RineGroupCreateTool(BaseRineTool):
         except Exception as err:  # noqa: BLE001
             return _format_error(err)
         return (
-            f"Created group {group.handle} (id {group.id}, sender-key E2EE, "
+            f"Created group {group.handle} (id {group.id}, {group_encryption_label(group)}, "
             f"enrollment {group.enrollment_policy})."
         )
 
@@ -159,7 +170,7 @@ class RineGroupRemoveTool(BaseRineTool):
 
     name: str = "rine_group_remove"
     description: str = (
-        "Remove a member from a group your agent administers. Triggers a sender-key "
+        "Remove a member from a group your agent administers. Triggers a key "
         "rotation (forward secrecy). Performs a real, irreversible network action."
     )
     args_schema: type[BaseModel] = RineGroupRemoveInput
@@ -196,12 +207,12 @@ class RineGroupInspectInput(BaseModel):
 
 
 class RineGroupInspectTool(BaseRineTool):
-    """Show a group's details + sender-key-vs-MLS self-diagnosis."""
+    """Show a group's details + its encryption type (post-quantum MLS or sender-key)."""
 
     name: str = "rine_group_inspect"
     description: str = (
-        "Show a group's details and encryption status, so you can tell whether your agent "
-        "can read/post it (sender-key) or not (MLS)."
+        "Show a group's details and encryption type (post-quantum MLS or sender-key). "
+        "Both are end-to-end encrypted and readable/postable from here."
     )
     args_schema: type[BaseModel] = RineGroupInspectInput
 
@@ -248,9 +259,104 @@ class RineGroupInspectTool(BaseRineTool):
         return next((g for g in groups if normalize_handle(g.handle) == wanted), None)
 
 
+class RineGroupJoinInput(BaseModel):
+    """Arguments for ``rine_group_join``."""
+
+    group: str = Field(description="Group handle (#group@org) or UUID.")
+    message: str | None = Field(default=None, description="Optional message for join request.")
+
+
+class RineGroupJoinTool(BaseRineTool):
+    """Join a group, or submit a join request if the group requires a vote."""
+
+    name: str = "rine_group_join"
+    description: str = (
+        "Join a group. Open groups: instant join. Approval-gated groups: submits a request "
+        "that members vote on. Performs a real, irreversible network action."
+    )
+    args_schema: type[BaseModel] = RineGroupJoinInput
+
+    def _run(
+        self,
+        group: str,
+        message: str | None = None,
+        run_manager: CallbackManagerForToolRun | None = None,
+    ) -> str:
+        try:
+            result = self._get_client().groups.join(group, message=message, agent=self.agent)
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return _render_join_result(group, result)
+
+    async def _arun(
+        self,
+        group: str,
+        message: str | None = None,
+        run_manager: AsyncCallbackManagerForToolRun | None = None,
+    ) -> str:
+        try:
+            result = await self._aget_client().groups.join(
+                group, message=message, agent=self.agent
+            )
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return _render_join_result(group, result)
+
+
+def _render_join_result(group: str, result: JoinResult) -> str:
+    """Render a ``JoinedResult``/``PendingJoinResult``, discriminated on ``.status``."""
+    if result.status == "joined":
+        return f"Joined {group} (member id {result.member.agent_id})."
+    return (
+        f"Requested to join {group} (request {result.request.id}, "
+        f"status {result.request.status}); awaiting a member vote."
+    )
+
+
+class RineGroupInvitesInput(BaseModel):
+    """Arguments for ``rine_group_invites`` (none required)."""
+
+
+class RineGroupInvitesTool(BaseRineTool):
+    """List open group invites addressed to your agent, across all groups."""
+
+    name: str = "rine_group_invites"
+    description: str = (
+        "List group invites addressed to your agent. Each invite shows the group, "
+        "who invited you, and any message — join with rine_group_join using the group handle."
+    )
+    args_schema: type[BaseModel] = RineGroupInvitesInput
+
+    def _run(self, run_manager: CallbackManagerForToolRun | None = None) -> str:
+        try:
+            invites = self._get_client().groups.list_invites(agent=self.agent)
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return _render_invites(invites)
+
+    async def _arun(self, run_manager: AsyncCallbackManagerForToolRun | None = None) -> str:
+        try:
+            invites = await self._aget_client().groups.list_invites(agent=self.agent)
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return _render_invites(invites)
+
+
+def _render_invites(invites: list[JoinRequestRead]) -> str:
+    if not invites:
+        return "No pending group invites."
+    lines = [
+        f"- {inv.group_handle or inv.group_id} (request {inv.id}, status {inv.status})"
+        for inv in invites
+    ]
+    return "Pending invites:\n" + "\n".join(lines)
+
+
 __all__ = [
     "RineGroupCreateTool",
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    "RineGroupJoinTool",
+    "RineGroupInvitesTool",
 ]

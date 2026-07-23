@@ -1,6 +1,6 @@
 """Tier-3 idle-wake demo: an inbound rine message wakes a paused LangGraph thread.
 
-This is the runnable, clonable cross-process handoff demo (SPEC §11 Tier-3, D14-D17). It shows
+This is the runnable, clonable cross-process handoff demo (Tier-3). It shows
 the full loop:
 
 1. A small ``StateGraph`` has a node that calls ``interrupt(HumanInterrupt{...})`` to *pause and
@@ -13,7 +13,7 @@ the full loop:
    by ``(sender_handle, conversation_id)`` and streams ``Command(resume=<HumanResponse>)`` — the
    ``interrupt()`` call site receives the decrypted reply text and the graph runs to completion.
 
-**Caller owns the saver lifecycle (D17).** ``SqliteSaver.from_conn_string(...)`` is opened in a
+**Caller owns the saver lifecycle.** ``SqliteSaver.from_conn_string(...)`` is opened in a
 ``with``-block here; the resumer takes the *already-compiled* graph. The thread-map
 (:class:`~langchain_rine._threadmap.SqliteThreadMap`) is co-located in a sibling sqlite file so the
 ``(handle, conversation_id) -> thread_id`` binding also survives a restart.
@@ -58,7 +58,7 @@ class State(TypedDict):
 def await_reply(state: State) -> dict[str, Any]:
     """Pause the graph until an inbound rine reply is delivered to the ``interrupt`` call.
 
-    The ``HumanInterrupt`` payload follows the Agent-Inbox schema (PHASE0_v2_CONTRACT §7). On the
+    The ``HumanInterrupt`` payload follows the Agent-Inbox schema. On the
     first pass this raises/pauses; when the resumer streams ``Command(resume=<HumanResponse>)`` the
     call returns that response and we read the peer's free-text reply out of ``args``.
     """
@@ -93,7 +93,7 @@ def main() -> None:
     to = sys.argv[1] if len(sys.argv) > 1 else "peer@other.rine.network"
     question = sys.argv[2] if len(sys.argv) > 2 else "What's the ETA on the task?"
 
-    # The caller owns the checkpointer context (D17): everything runs inside this with-block.
+    # The caller owns the checkpointer context: everything runs inside this with-block.
     with SqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
         graph = build_graph(saver)
         store = SqliteThreadMap(THREADMAP_DB)

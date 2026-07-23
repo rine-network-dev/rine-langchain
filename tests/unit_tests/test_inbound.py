@@ -1,11 +1,11 @@
-"""Behavioral tests for the Tier-3 resumer + drivers (inbound.py / drivers.py, D14-D17).
+"""Behavioral tests for the Tier-3 resumer + drivers (inbound.py / drivers.py).
 
 The resumer is exercised through its public interface (``handle_inbound`` / ``ahandle_inbound`` /
 ``register``) against a **real** fake ``StateGraph`` (one ``interrupt()`` node) compiled with a
 real ``InMemorySaver`` + an :class:`InMemoryThreadMap`. Messages are real ``rine.DecryptedMessage``
 objects. The driver is exercised over the **real** rine SDK with only the HTTP boundary mocked
 (respx), reusing ``conftest``'s real config dir + on-disk keys + a genuine HPKE self-encrypt
-round-trip so plaintext / I-2 run real crypto.
+round-trip so plaintext / ciphertext-absence run real crypto.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ SENDER = "peer@acme.rine.network"
 THREAD = "thread-1"
 SECOND_MESSAGE_ID = "cccccccc-dddd-eeee-ffff-000000000009"
 
-# A wire ciphertext string that must NEVER reach a resume value (the I-2 guard).
+# A wire ciphertext string that must NEVER reach a resume value (the ciphertext-absence guard).
 CIPHERTEXT_MARKER = "ZW5jcnlwdGVkLWNpcGhlcnRleHQtbWFya2Vy"
 
 
@@ -56,7 +56,7 @@ class _State(TypedDict):
 def _resume_text(response: Any) -> str:
     """Read the plaintext from a resumed HumanResponse the way a real graph node does.
 
-    REQ-FORK-01: ``args`` is now a dict ``{"text", "rine_message_id", "rine_conversation_id"}``
+    ``args`` is now a dict ``{"text", "rine_message_id", "rine_conversation_id"}``
     (so the node can ``rine_reply(message_id=…)`` in-place). The synthetic ``expire`` note emits
     the same ``{"text": …}`` shape. A bare-string ``args`` (older/legacy) is tolerated.
     """
@@ -129,7 +129,7 @@ def _counting_rearming_graph(saver: InMemorySaver, counter: list[int]) -> Any:
     """A re-arming graph that records each time the FIRST node runs past its interrupt.
 
     ``counter`` is appended to once per first-node resume body so a test can assert the node ran
-    **exactly once** even when a redelivered, already-consumed message is re-polled (D20: the
+    **exactly once** even when a redelivered, already-consumed message is re-polled (the
     second poll must be ``SKIPPED_ALREADY_CONSUMED``, never a re-resume that bumps the counter).
     """
 
@@ -152,7 +152,7 @@ def _counting_rearming_graph(saver: InMemorySaver, counter: list[int]) -> Any:
 
 
 def _raising_node(state: _State) -> dict[str, Any]:
-    """Park at ``interrupt``; on resume, raise — exercises the resume try/except (inv-1)."""
+    """Park at ``interrupt``; on resume, raise — exercises the resume try/except."""
     interrupt({"prompt": "awaiting reply"})
     raise RuntimeError("node blew up on resume")
 
@@ -183,7 +183,7 @@ def _message(
     """Build a real ``DecryptedMessage`` (the resumer operates on these, not raw HTTP).
 
     Defaults to a ``verified`` signature so the resume value is clean plaintext; pass
-    ``verification_status="unverifiable"`` / ``"invalid"`` to exercise the wh-2/D19 gate.
+    ``verification_status="unverifiable"`` / ``"invalid"`` to exercise the verification gate.
     """
     return DecryptedMessage(
         id=msg_id,
@@ -203,13 +203,13 @@ def _message(
 
 
 # =====================================================================
-# build_human_response — reply-in-place payload (REQ-FORK-01)
+# build_human_response — reply-in-place payload
 # =====================================================================
 
 
 class TestBuildHumanResponse:
     def test_args_carries_inbound_ids_for_in_place_reply(self):
-        """REQ-FORK-01: resume payload carries the ids for an in-place reply.
+        """Resume payload carries the ids for an in-place reply.
 
         The graph's reply node gets the inbound message + conversation ids so it can
         ``rine_reply(message_id=…)`` rather than fork a new conversation via ``rine_send``.
@@ -230,11 +230,11 @@ class TestBuildHumanResponse:
         assert args["text"].startswith("[unverified sender]")
         assert "maybe real" in args["text"]
         assert args["rine_message_id"] == MESSAGE_ID
-        # I-2: the ciphertext never appears in the resume payload.
+        # the ciphertext never appears in the resume payload.
         assert CIPHERTEXT_MARKER not in args["text"]
 
     def test_req_ctx_02_no_transcript_injected_into_resume_payload(self):
-        """REQ-CTX-02: the resume payload pushes NO rine transcript (no double-context).
+        """The resume payload pushes NO rine transcript (no double-context).
 
         langchain relies on the host LangGraph checkpoint store + the pull tool
         (``rine_thread``) for cross-turn context — never a pushed transcript. The
@@ -271,7 +271,7 @@ class TestResumerHappyPath:
         assert state.values["reply"] == "the answer is 42"
 
     def test_handle_inbound_resume_value_is_plaintext_not_ciphertext(self):
-        """I-2: the resumed graph never receives the encrypted_payload string."""
+        """The resumed graph never receives the encrypted_payload string."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -322,7 +322,7 @@ class TestResumerGuards:
         assert result.status is ResumeStatus.SKIPPED_MULTIPLE_INTERRUPTS
 
     def test_handle_inbound_with_decrypt_error_skips_and_leaks_no_ciphertext(self):
-        """I-2: a decrypt_error message is never resumed; ciphertext never enters the graph."""
+        """A decrypt_error message is never resumed; ciphertext never enters the graph."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -352,7 +352,7 @@ class TestResumerGuards:
 
 class TestResumerRegistration:
     def test_register_same_key_new_thread_overwrites_and_warns(self, caplog):
-        """D16 newest-wins: a re-registration overwrites + logs a WARNING."""
+        """Newest-wins: a re-registration overwrites + logs a WARNING."""
         store = InMemoryThreadMap()
         resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), store)
         resumer.register(SENDER, CONVERSATION_ID, "thread-old")
@@ -372,13 +372,13 @@ class TestResumerRegistration:
 
 
 # =====================================================================
-# A / D18 — terminal-unregister (completed threads stop shadowing later mail)
+# Terminal-unregister (completed threads stop shadowing later mail)
 # =====================================================================
 
 
 class TestTerminalUnregister:
     def test_single_interrupt_thread_unregisters_on_completion(self):
-        """A single-interrupt thread that RESUMES to completion drops its binding (tm-1)."""
+        """A single-interrupt thread that RESUMES to completion drops its binding."""
         graph = _single_interrupt_graph(InMemorySaver())
         store = InMemoryThreadMap()
         resumer = RineThreadResumer(graph, store)
@@ -413,13 +413,13 @@ class TestTerminalUnregister:
 
 
 # =====================================================================
-# D / wh-2 — signature-verification gating (a tampered sig never wakes a graph)
+# Signature-verification gating (a tampered sig never wakes a graph)
 # =====================================================================
 
 
 class TestVerificationGating:
     def test_invalid_signature_skips_unverified_and_leaves_graph_untouched(self):
-        """wh-2: an INVALID (tampered/forged) signature never resumes; the graph stays parked."""
+        """An INVALID (tampered/forged) signature never resumes; the graph stays parked."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -435,7 +435,7 @@ class TestVerificationGating:
         assert CIPHERTEXT_MARKER not in str(state.values)
 
     def test_unverifiable_resumes_with_marker_plaintext_no_ciphertext(self):
-        """wh-2: an UNVERIFIABLE sender resumes, but the value is annotated + carries plaintext."""
+        """An UNVERIFIABLE sender resumes, but the value is annotated + carries plaintext."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -448,11 +448,11 @@ class TestVerificationGating:
         assert result.status is ResumeStatus.RESUMED
         reply = graph.get_state({"configurable": {"thread_id": THREAD}}).values["reply"]
         assert "[unverified" in reply  # the trust marker is present
-        assert "maybe real" in reply  # the plaintext still reaches the graph (I-2 unchanged)
+        assert "maybe real" in reply  # the plaintext still reaches the graph
         assert CIPHERTEXT_MARKER not in reply  # never the ciphertext
 
     def test_verified_resumes_clean_without_marker(self):
-        """wh-2: a VERIFIED message resumes with clean plaintext (no trust marker)."""
+        """A VERIFIED message resumes with clean plaintext (no trust marker)."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -465,7 +465,7 @@ class TestVerificationGating:
 
 
 # =====================================================================
-# C / inv-1 — per-message failure isolation (a raising node does not kill the sweep)
+# Per-message failure isolation (a raising node does not kill the sweep)
 # =====================================================================
 
 
@@ -483,7 +483,7 @@ class TestResumeFailureIsolation:
         assert result.thread_id == THREAD
 
     def test_raising_node_failed_leaves_journal_clean_so_it_genuinely_retries(self):
-        """D20 act-then-record: a raising-node FAILED must NOT journal the message (no phantom).
+        """Act-then-record: a raising-node FAILED must NOT journal the message (no phantom).
 
         ``invoke`` runs before ``mark_consumed`` (act-then-record), so a node that raises throws
         before the journal write — the message is NEVER recorded consumed. A FAILED has
@@ -504,11 +504,11 @@ class TestResumeFailureIsolation:
         assert store.is_consumed(SENDER, CONVERSATION_ID, MESSAGE_ID) is False  # journal clean
 
     def test_mark_consumed_store_error_degrades_to_failed_not_a_crash(self):
-        """D20 residual (contract l.70-71): a ``mark_consumed`` store error → FAILED, not a crash.
+        """Residual: a ``mark_consumed`` store error → FAILED, not a crash.
 
         ``mark_consumed`` stays inside the resume try/except, so if the durable journal write
         raises AFTER a successful ``invoke``, the resumer degrades to FAILED (at-least-once on
-        re-poll) and never propagates a raw exception that would kill the sweep (I-3). The mark
+        re-poll) and never propagates a raw exception that would kill the sweep. The mark
         never committed, so the entry stays absent (a re-poll re-resumes — the accepted
         at-least-once on-store-error residual).
         """
@@ -530,7 +530,7 @@ class TestResumeFailureIsolation:
 
 
 # =====================================================================
-# Async parity (D3)
+# Async parity
 # =====================================================================
 
 
@@ -566,7 +566,7 @@ def _inbox_two_messages(config_dir: str) -> dict[str, Any]:
     """A two-item inbox: one maps to the parked thread, one does not.
 
     Both carry real HPKE-self-encrypted plaintext (the SDK decrypts them with the on-disk key), so
-    ``sender_handle`` + ``conversation_id`` flow through and I-2 runs real crypto.
+    ``sender_handle`` + ``conversation_id`` flow through and ciphertext-absence runs real crypto.
     """
     mapped = {
         "id": MESSAGE_ID,
@@ -684,11 +684,11 @@ class TestPollDriver:
         driver = PollDriver(resumer, config_dir=config_dir, api_url=API_URL)
         driver.poll_once()
 
-        assert not ack.called  # a skip is never acked (D16: message stays in the inbox)
+        assert not ack.called  # a skip is never acked (message stays in the inbox)
 
     @respx.mock
     async def test_apoll_once_matches_sync(self, config_dir):
-        """D3 async parity: apoll_once produces the same statuses + ack policy as poll_once."""
+        """Async parity: apoll_once produces the same statuses + ack policy as poll_once."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
@@ -722,7 +722,7 @@ class TestPollDriver:
 class TestPollDriverFailureIsolation:
     @respx.mock
     def test_poll_once_processes_second_message_when_first_resume_raises(self, config_dir):
-        """inv-1: a raising resume → FAILED for that message; the rest of the batch still runs."""
+        """A raising resume → FAILED for that message; the rest of the batch still runs."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
@@ -750,7 +750,7 @@ class TestPollDriverFailureIsolation:
         assert not ack.called  # neither a FAILED nor a SKIP is acked
 
     def test_run_survives_a_sweep_that_raises(self):
-        """inv-1: a transient poll_once failure is logged; the loop continues, never propagates."""
+        """A transient poll_once failure is logged; the loop continues, never propagates."""
         from unittest.mock import patch
 
         resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
@@ -767,7 +767,7 @@ class TestPollDriverFailureIsolation:
 def _webhook_message(config_dir: str, *, text: str = "webhook reply") -> dict[str, Any]:
     """A server message payload the webhook handler fetches via ``GET /messages/{id}``.
 
-    Real HPKE-self-encrypted so the SDK's ``client.read`` decrypts it (D19: the handler trusts the
+    Real HPKE-self-encrypted so the SDK's ``client.read`` decrypts it (the handler trusts the
     authenticated fetch, never a caller-supplied body) and ``sender_handle`` / ``conversation_id``
     flow through for the resume match.
     """
@@ -788,7 +788,7 @@ def _webhook_message(config_dir: str, *, text: str = "webhook reply") -> dict[st
 class TestWebhookHandler:
     @respx.mock
     def test_handler_fetches_by_id_then_resumes_and_acks(self, config_dir):
-        """D19/wh-1: the handler takes a message_id, does the authenticated read, then resumes."""
+        """The handler takes a message_id, does the authenticated read, then resumes."""
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
@@ -838,7 +838,7 @@ class TestWebhookHandler:
 
 
 # =====================================================================
-# Import-safety (I-1)
+# Import-safety
 # =====================================================================
 
 _IMPORT_GUARD = """
@@ -857,7 +857,7 @@ print("OK")
 
 class TestInboundImportSafety:
     def test_inbound_import_performs_no_network_call(self):
-        """I-1: importing the resumer/driver builds no client and hits no socket."""
+        """Importing the resumer/driver builds no client and hits no socket."""
         import subprocess
         import sys
 
@@ -872,7 +872,7 @@ class TestInboundImportSafety:
 
 
 # =====================================================================
-# inv-2 — missing-langgraph friendly [inbound]-extra hint (DX-regression guard)
+# Missing-langgraph friendly [inbound]-extra hint (DX-regression guard)
 # =====================================================================
 
 # Run in a subprocess that BLOCKS langgraph via a sys.meta_path finder (so the rig's installed
@@ -904,7 +904,7 @@ else:
 
 class TestMissingLanggraphHint:
     def test_inbound_import_without_langgraph_raises_friendly_hint(self):
-        """inv-2: a tools-only install (no langgraph) gets the `[inbound]` extra hint."""
+        """A tools-only install (no langgraph) gets the `[inbound]` extra hint."""
         import subprocess
         import sys
 
@@ -919,14 +919,14 @@ class TestMissingLanggraphHint:
 
 
 # =====================================================================
-# D20 — exactly-once resume (THE headline: survives an ack failure + a re-arm)
+# Exactly-once resume (THE headline: survives an ack failure + a re-arm)
 # =====================================================================
 
 
 class TestExactlyOnceAcrossAckFailure:
     @respx.mock
     def test_ack_failure_then_repoll_skips_already_consumed_no_second_resume(self, config_dir):
-        """idem-1 (HIGH): an ack failure must NOT double-resume a re-armed multi-turn thread.
+        """An ack failure must NOT double-resume a re-armed multi-turn thread.
 
         Sequence:
           1. M1 maps to a re-arming graph parked at interrupt#1; poll → RESUMED, thread re-arms at
@@ -985,14 +985,14 @@ class TestExactlyOnceAcrossAckFailure:
         assert state_after_second.values["reply"] == "turn one"  # unchanged
 
     def test_single_interrupt_redelivery_after_unregister_is_consumed_not_no_thread(self):
-        """D20 guard order (locked): consumed-check runs BEFORE the no-thread lookup.
+        """Guard order (locked): consumed-check runs BEFORE the no-thread lookup.
 
         A single-interrupt thread resumes to completion → ``mark_consumed`` records M1, then the
         terminal-unregister DELETES its binding. The SAME M1 redelivered (e.g. its ack was lost)
         now hits ``store.get`` returning None. The locked order (is_consumed BEFORE get) must
         recognize it as ``SKIPPED_ALREADY_CONSUMED`` (``should_ack`` True → re-acked, leaves the
         inbox), NOT strand it as ``SKIPPED_NO_THREAD`` (``should_ack`` False → re-fetched +
-        re-decrypted every poll, the tm-1 starvation v0.3 closes). Reversing the guard order to
+        re-decrypted every poll, the starvation v0.3 closes). Reversing the guard order to
         get-then-is_consumed would silently regress this case (this test fails on the reversal).
         """
         graph = _single_interrupt_graph(InMemorySaver())
@@ -1013,7 +1013,7 @@ class TestExactlyOnceAcrossAckFailure:
 
     @respx.mock
     def test_already_consumed_is_reacked_so_it_leaves_the_inbox(self, config_dir):
-        """D20 ack policy: a redelivered already-consumed message is RE-acked (should_ack True).
+        """Ack policy: a redelivered already-consumed message is RE-acked (should_ack True).
 
         Once the journal recognizes M1 as consumed, the driver still acks it (so it finally leaves
         the inbox) — it just does not resume it again. Here the ack succeeds on the second poll.
@@ -1047,12 +1047,12 @@ class TestExactlyOnceAcrossAckFailure:
 
         assert [r.status for r in second] == [ResumeStatus.SKIPPED_ALREADY_CONSUMED]
         assert ack.call_count == 2  # the consumed message was re-acked, not ignored
-        # self-clean: the successful second ack dropped the journal entry (bounded growth, inv-2)
+        # self-clean: the successful second ack dropped the journal entry (bounded growth)
         assert store.is_consumed(SENDER, CONVERSATION_ID, MESSAGE_ID) is False
 
 
 # =====================================================================
-# D20 — should_ack policy + self-cleaning confirm_delivered
+# should_ack policy + self-cleaning confirm_delivered
 # =====================================================================
 
 
@@ -1066,7 +1066,7 @@ class TestShouldAckPolicy:
             assert ResumeResult(status).should_ack is (status in ack), status
 
     def test_confirm_delivered_drops_consumed_entry(self):
-        """D20 self-clean: confirm_delivered drops the journal entry for the acked message."""
+        """Self-clean: confirm_delivered drops the journal entry for the acked message."""
         store = InMemoryThreadMap()
         resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), store)
         store.mark_consumed(SENDER, CONVERSATION_ID, MESSAGE_ID)
@@ -1117,13 +1117,13 @@ class TestShouldAckPolicy:
 
 
 # =====================================================================
-# D21 — async-native store path (ahandle_inbound over an aiosqlite-backed store)
+# Async-native store path (ahandle_inbound over an aiosqlite-backed store)
 # =====================================================================
 
 
 class TestAsyncStorePath:
     async def test_ahandle_inbound_via_sqlite_store_records_consumed(self, tmp_path):
-        """D21: ahandle_inbound resumes through the async store + records via amark_consumed.
+        """ahandle_inbound resumes through the async store + records via amark_consumed.
 
         Drives the resumer's async path end-to-end over an aiosqlite-backed SqliteThreadMap (the
         first runtime exercise of the async store from the resumer): a parked thread resumes and
@@ -1147,7 +1147,7 @@ class TestAsyncStorePath:
         await store.aclose()
 
     async def test_ahandle_inbound_async_exactly_once_on_redelivery(self, tmp_path):
-        """D20/D21 async: a redelivered already-consumed message is skipped on the async path."""
+        """Async: a redelivered already-consumed message is skipped on the async path."""
         from langchain_rine._threadmap import SqliteThreadMap
 
         store = SqliteThreadMap(str(tmp_path / "tm.sqlite"))
@@ -1166,7 +1166,7 @@ class TestAsyncStorePath:
         await store.aclose()
 
     async def test_aconfirm_delivered_drops_via_adrop_consumed(self, tmp_path):
-        """D21 async self-clean: aconfirm_delivered clears the async journal entry."""
+        """Async self-clean: aconfirm_delivered clears the async journal entry."""
         from langchain_rine._threadmap import SqliteThreadMap
 
         store = SqliteThreadMap(str(tmp_path / "tm.sqlite"))
@@ -1182,7 +1182,7 @@ class TestAsyncStorePath:
     async def test_apoll_once_confirms_delivered_after_successful_ack_over_sqlite(
         self, config_dir, tmp_path
     ):
-        """D20/D21 async end-to-end self-clean over the production aiosqlite store.
+        """Async end-to-end self-clean over the production aiosqlite store.
 
         Drives the FULL async driver ladder (apoll_once → ahandle_inbound → amark_consumed → _aack
         success → aconfirm_delivered → adrop_consumed) over a real ``SqliteThreadMap``. A
@@ -1222,7 +1222,7 @@ class TestAsyncStorePath:
     async def test_apoll_once_ack_failure_then_redelivery_is_consumed_over_sqlite(
         self, config_dir, tmp_path
     ):
-        """D20 async exactly-once through the driver: an ack failure does NOT double-resume.
+        """Async exactly-once through the driver: an ack failure does NOT double-resume.
 
         Async twin of ``test_ack_failure_then_repoll_skips_already_consumed_no_second_resume``,
         driven end-to-end through ``apoll_once`` over the aiosqlite store: poll #1 resumes +
@@ -1265,13 +1265,13 @@ class TestAsyncStorePath:
 
 
 # =====================================================================
-# D23 — require_verified opt-in
+# require_verified opt-in
 # =====================================================================
 
 
 class TestRequireVerified:
     def test_unverifiable_is_skipped_when_require_verified(self):
-        """D23 strict: with require_verified=True an UNVERIFIABLE sender is skipped, not woken."""
+        """Strict: with require_verified=True an UNVERIFIABLE sender is skipped, not woken."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap(), require_verified=True)
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -1287,7 +1287,7 @@ class TestRequireVerified:
         assert CIPHERTEXT_MARKER not in str(state.values)
 
     def test_unverifiable_resumes_with_marker_when_not_require_verified(self):
-        """D23 default (v0.2 regression): require_verified=False annotates + resumes unverified."""
+        """Default (v0.2 regression): require_verified=False annotates + resumes unverified."""
         graph = _single_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())  # require_verified defaults False
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -1317,13 +1317,13 @@ class TestRequireVerified:
 
 
 # =====================================================================
-# D24 — reply-timeout helper (expire)
+# Reply-timeout helper (expire)
 # =====================================================================
 
 
 class TestExpire:
     def test_expire_resumes_parked_thread_with_sentinel_then_unregisters(self):
-        """D24: expire wakes a parked thread with the synthetic note, then drops the binding."""
+        """Expire wakes a parked thread with the synthetic note, then drops the binding."""
         graph = _single_interrupt_graph(InMemorySaver())
         store = InMemoryThreadMap()
         resumer = RineThreadResumer(graph, store)
@@ -1333,7 +1333,7 @@ class TestExpire:
         result = resumer.expire(SENDER, CONVERSATION_ID, note="[reply timeout]")
 
         assert result.status is ResumeStatus.RESUMED
-        # the sentinel note reached the graph at the interrupt site (I-2: a literal, not content)
+        # the sentinel note reached the graph at the interrupt site (a literal, not content)
         state = graph.get_state({"configurable": {"thread_id": THREAD}})
         assert state.values["reply"] == "[reply timeout]"
         assert state.next == ()  # ran to completion
@@ -1341,7 +1341,7 @@ class TestExpire:
         assert store.get(SENDER, CONVERSATION_ID) is None
 
     def test_expire_with_no_mapped_thread_skips_no_thread(self):
-        """D24: expiring a conversation with no parked thread skips (nothing to wake)."""
+        """Expiring a conversation with no parked thread skips (nothing to wake)."""
         resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
 
         result = resumer.expire(SENDER, CONVERSATION_ID)
@@ -1350,14 +1350,14 @@ class TestExpire:
 
 
 # =====================================================================
-# D22 — PollDriver backs off when another owner holds the inbox lease
+# PollDriver backs off when another owner holds the inbox lease
 # =====================================================================
 
 
 class TestPollDriverLease:
     @respx.mock
     def test_poll_once_backs_off_when_lease_held_by_another_owner(self, config_dir, tmp_path):
-        """D22: a PollDriver whose lease another live owner holds fetches nothing, returns []."""
+        """A PollDriver whose lease another live owner holds fetches nothing, returns []."""
         from langchain_rine._lease import SqliteLease
 
         # No inbox/keys/ack mocks at all: if the driver fetched, respx would raise on the un-mocked
@@ -1381,7 +1381,7 @@ class TestPollDriverLease:
 
     @respx.mock
     def test_poll_once_proceeds_when_it_holds_the_lease(self, config_dir, tmp_path):
-        """D22: with an uncontended lease the driver acquires it and runs a normal sweep."""
+        """With an uncontended lease the driver acquires it and runs a normal sweep."""
         from langchain_rine._lease import SqliteLease
 
         mock_token()
@@ -1415,7 +1415,7 @@ class TestPollDriverLease:
 
     @respx.mock
     async def test_apoll_once_backs_off_when_lease_held(self, config_dir, tmp_path):
-        """D22 async: apoll_once also backs off (acquires the lease via asyncio.to_thread)."""
+        """Async: apoll_once also backs off (acquires the lease via asyncio.to_thread)."""
         from langchain_rine._lease import SqliteLease
 
         mock_token()
@@ -1440,7 +1440,7 @@ class TestPollDriverLease:
 
     @respx.mock
     def test_run_releases_the_lease_on_clean_shutdown(self, config_dir, tmp_path):
-        """D22: ``run`` releases the lease in a ``finally`` so a clean shutdown frees the inbox.
+        """``run`` releases the lease in a ``finally`` so a clean shutdown frees the inbox.
 
         Run one bounded sweep holding a lease; afterward a FRESH owner on the same db+key must
         acquire immediately (no waiting out the ttl). A regression dropping the ``finally:
@@ -1480,7 +1480,7 @@ class TestPollDriverLease:
 
     @respx.mock
     async def test_arun_releases_the_lease_on_clean_shutdown(self, config_dir, tmp_path):
-        """D22 async twin: ``arun`` releases the lease in a ``finally`` (via asyncio.to_thread)."""
+        """Async twin: ``arun`` releases the lease in a ``finally`` (via asyncio.to_thread)."""
         from langchain_rine._lease import SqliteLease
 
         mock_token()

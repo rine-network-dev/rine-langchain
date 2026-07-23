@@ -1,4 +1,4 @@
-"""Opt-in agent/chain-lifecycle callback handler (SPEC §8).
+"""Opt-in agent/chain-lifecycle callback handler.
 
 ``RineCallbackHandler`` is a ``langchain_core.callbacks.BaseCallbackHandler`` that
 sends a best-effort rine message on selected LangChain lifecycle events. It is the
@@ -8,11 +8,10 @@ server physically cannot.
 Activation is opt-in by instantiation — the developer constructs the handler
 (``RineCallbackHandler(to="ops@acme")``) and threads it through
 ``config={"callbacks": [handler]}``. The ``SyncRineClient`` is built lazily on the
-first fired event (never at import/``__init__``), keeping import side-effect-free
-(invariant I-1).
+first fired event (never at import/``__init__``), keeping import side-effect-free.
 
 A notification failure must NEVER crash an agent run: ``_notify`` swallows its own
-exceptions and logs at debug (AC-13). Each overridden lifecycle method fires only
+exceptions and logs at debug. Each overridden lifecycle method fires only
 when its selector is present in ``on``.
 """
 
@@ -36,7 +35,7 @@ _MAX_SUMMARY = 500
 
 
 class RineCallbackHandler(BaseCallbackHandler):
-    """Send a rine message on selected LangChain lifecycle events (SPEC §8).
+    """Send a rine message on selected LangChain lifecycle events.
 
     Args:
         to: rine handle/UUID to notify.
@@ -56,7 +55,7 @@ class RineCallbackHandler(BaseCallbackHandler):
         agent: str | None = None,
         on: tuple[str, ...] = ("agent_finish", "chain_error"),
     ) -> None:
-        """Configure the handler. No client is built here (I-1)."""
+        """Configure the handler. No client is built here."""
         self._to = to
         self._config_dir = config_dir
         self._api_url = api_url
@@ -73,7 +72,7 @@ class RineCallbackHandler(BaseCallbackHandler):
         return self._client
 
     def _notify(self, text: str) -> None:
-        """Best-effort send. A notification failure must not crash the run (AC-13)."""
+        """Best-effort send. A notification failure must not crash the run."""
         try:
             self._get_client().send(
                 self._to, {"text": text[:_MAX_SUMMARY]}, message_type="rine.v1.text"
@@ -81,7 +80,7 @@ class RineCallbackHandler(BaseCallbackHandler):
         except Exception:  # noqa: BLE001 — never propagate out of a callback
             logger.debug("rine notification send failed", exc_info=True)
 
-    # --- selector → LC handler-method map (SPEC §8; signatures verified PHASE0 §6) ---
+    # --- selector → LC handler-method map (signatures verified against langchain-core) ---
     def on_agent_finish(
         self, finish: Any, *, run_id: UUID, parent_run_id: UUID | None = None, **kwargs: Any
     ) -> None:

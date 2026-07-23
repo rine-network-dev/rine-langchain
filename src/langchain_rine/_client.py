@@ -1,7 +1,7 @@
 """Shared config/auth resolver and tool base for langchain-rine.
 
 One place every tool gets its ``rine`` client from. The resolution chain is the
-SDK's, untouched (SPEC §7): ``RINE_CLIENT_ID``+``RINE_CLIENT_SECRET`` env →
+SDK's, untouched: ``RINE_CLIENT_ID``+``RINE_CLIENT_SECRET`` env →
 ``RINE_CONFIG_DIR`` env → ``~/.config/rine`` → ``cwd/.rine``. We do **not** reimplement
 that chain — the SDK's clients resolve it when ``config_dir``/``api_url``/``agent`` are
 left at their defaults. This module only:
@@ -11,7 +11,7 @@ left at their defaults. This module only:
 - maps typed ``RineError``s to clear LLM-facing strings (``_format_error``);
 - gives every tool a ``BaseRineTool`` base carrying the override fields + lazy clients.
 
-Side-effect-free import (invariant I-1): nothing here touches the network, reads
+Side-effect-free import: nothing here touches the network, reads
 credentials, or constructs a client at import time.
 """
 
@@ -34,7 +34,6 @@ from pydantic import PrivateAttr
 from rine import (
     AuthenticationError,
     ConfigError,
-    MlsUnsupportedError,
     NotFoundError,
     RateLimitError,
     RineApiError,
@@ -83,19 +82,17 @@ def abuild_client(*, config_dir: str | None, api_url: str | None, agent: str | N
 
 
 def _format_error(err: Exception) -> str:
-    """Map a Rine error to a clear, LLM-facing string (SPEC §6.14).
+    """Map a Rine error to a clear, LLM-facing string.
 
     Tool ``_run``/``_arun`` bodies return these strings; LangChain surfaces them to the
     agent so it retries/continues rather than crashing. Never leak a raw traceback to a
-    tool return. Most-specific-first ordering matters: ``MlsUnsupportedError`` (and the
-    other typed subclasses) extend ``RineError`` directly, not ``RineApiError`` — keep
-    them ahead of the ``RineApiError`` catch-all.
+    tool return. Most-specific-first ordering matters: the typed subclasses extend
+    ``RineError`` directly, not ``RineApiError`` — keep them ahead of the
+    ``RineApiError`` catch-all. Anything without a branch falls through to ``str(err)``,
+    which is where a crypto failure such as ``NoMlsGroupStateError`` lands: the SDK's
+    own message already tells the agent what to do about it, so restating it here would
+    only give the two places to drift apart.
     """
-    if isinstance(err, MlsUnsupportedError):
-        return (
-            "This group uses MLS encryption, which the Python side can't post to. "
-            "Create a sender-key group or have the TypeScript side disable MLS."
-        )
     if isinstance(err, AuthenticationError):
         return (
             "Rine auth failed — set RINE_CLIENT_ID/RINE_CLIENT_SECRET or onboard "
@@ -118,7 +115,7 @@ class BaseRineTool(BaseTool):
     Declares the SDK config overrides as constructor fields (per-tool, optional) and
     lazily builds the sync/async ``rine`` clients on first use. Building a client is
     deferred to ``_get_client``/``_aget_client`` (called from ``_run``/``_arun``) so
-    import and ``__init__`` stay side-effect-free (I-1).
+    import and ``__init__`` stay side-effect-free.
     """
 
     config_dir: str | None = None

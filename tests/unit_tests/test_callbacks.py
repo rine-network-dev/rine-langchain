@@ -1,4 +1,4 @@
-"""Behavioral tests for RineCallbackHandler (SPEC §8, AC-12/13).
+"""Behavioral tests for RineCallbackHandler.
 
 The handler is driven through its real public surface: instantiate it, then call
 the LangChain lifecycle method directly (``on_agent_finish`` / ``on_chain_error``
@@ -12,7 +12,7 @@ machinery is dropped. The content tests still decrypt the *actual wire body*
 (not a shared boolean), so an assertion can never be satisfied by a leaked
 sibling send.
 
-A notification failure must NEVER crash an agent run (AC-13): the failure-path
+A notification failure must NEVER crash an agent run: the failure-path
 test points the handler at a failing send and asserts the lifecycle method does
 not raise AND that a send was actually attempted (the failing route was called)
 — so the swallow is proven, not vacuously passed by a handler that never fired.
@@ -61,7 +61,7 @@ def _mock_send_to_self(config_dir):
 
     The handler is pointed at the caller agent's own UUID, so no WebFinger is
     needed and the posted ``encrypted_payload`` is HPKE-sealed to a key we hold —
-    letting a test decrypt the *actual notification text* off the wire (AC-12).
+    letting a test decrypt the *actual notification text* off the wire.
     """
     mock_token()
     mock_agents()
@@ -79,7 +79,7 @@ def _agent_finish(output: str) -> AgentFinish:
 class TestRineCallbackHandler:
     @respx.mock
     def test_agent_finish_sends_one_best_effort_message(self, config_dir, other_keys):
-        """AC-12: a fired agent_finish event ⇒ exactly one rine send."""
+        """A fired agent_finish event ⇒ exactly one rine send."""
         route = _mock_send(config_dir)
 
         handler = RineCallbackHandler(
@@ -93,7 +93,7 @@ class TestRineCallbackHandler:
 
     @respx.mock
     def test_agent_finish_wire_body_carries_the_summary(self, config_dir):
-        """AC-12: the decrypted wire body equals the expected ``agent finished:`` summary.
+        """The decrypted wire body equals the expected ``agent finished:`` summary.
 
         Decrypt the *actual* ``encrypted_payload`` (not a boolean) to prove the
         real notification content reached the wire — exactly one send whose
@@ -113,7 +113,7 @@ class TestRineCallbackHandler:
 
     @respx.mock
     def test_chain_error_wire_body_carries_the_error(self, config_dir):
-        """AC-12 (error verb): the decrypted body equals the ``chain error:`` summary."""
+        """The decrypted body equals the ``chain error:`` summary (error verb)."""
         route = _mock_send_to_self(config_dir)
 
         handler = RineCallbackHandler(
@@ -128,7 +128,7 @@ class TestRineCallbackHandler:
 
     @respx.mock
     def test_send_failure_is_swallowed_and_debug_logged(self, config_dir, caplog):
-        """AC-13: a send failure is swallowed + debug-logged, never raised — but it fired.
+        """A send failure is swallowed + debug-logged, never raised — but it fired.
 
         The recipient-key fetch 500s → ``send()`` raises internally; the handler
         swallows it. Asserting the failing route WAS called proves a send was
