@@ -136,7 +136,7 @@ class RinePayTool(BaseRineTool):
         "deny-by-default spend policy and sends it back in the same conversation. The "
         "spend is reserved as the last act before the send (permanent debit; no refund). "
         "Does NOT wait for settlement — the receipt arrives later as an ordinary inbox "
-        "message (read it with rine_read / rine_check_inbox / rine_thread). Returns a typed "
+        "message (read it with rine_read / rine_inbox / rine_thread). Returns a typed "
         "`status:` line — payment-submitted / no-wallet / not-payment-required / "
         "policy-refused / above-auto-pay-threshold / already-paid / wallet-busy."
     )

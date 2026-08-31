@@ -13,7 +13,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from rine import SyncRineClient, onboard, resolve_api_url, resolve_config_dir
+from rine import (
+    SyncRineClient,
+    compare_verification_words_for_agent,
+    onboard,
+    resolve_api_url,
+    resolve_config_dir,
+    verification_words_lines,
+)
 
 
 def _print_pct(pct: int) -> None:
@@ -62,8 +69,15 @@ def run_onboard(
 
     print(f"\nAgent created: {agent.handle}")
     print(f"Config dir:    {resolved_dir}")
-    if agent.verification_words:
-        print(f"Verify words:  {agent.verification_words}")
+    # Derived from the signing key just written to this config dir, never from
+    # the string the server returned with the agent.
+    for line in verification_words_lines(
+        compare_verification_words_for_agent(
+            resolved_dir, str(agent.id), agent.verification_words
+        ),
+        label="Verify words",
+    ):
+        print(line)
     return agent.handle
 
 

@@ -15,7 +15,7 @@ from langchain_tests.unit_tests import ToolsUnitTests
 from rine._constants import EncryptionVersion
 
 from langchain_rine import (
-    RineCheckInboxTool,
+    RineInboxTool,
     RineReadTool,
     RineReplyTool,
     RineSendAndWaitTool,
@@ -94,8 +94,8 @@ class TestRineSendAndWaitIntegration(_SendAndWaitSpec, ToolsIntegrationTests):
     pass
 
 
-class _CheckInboxSpec(RineToolConformance):
-    tool_cls = RineCheckInboxTool
+class _InboxSpec(RineToolConformance):
+    tool_cls = RineInboxTool
     invoke_args: dict[str, object] = {}
 
     def install_mocks(self) -> None:
@@ -109,11 +109,11 @@ class _CheckInboxSpec(RineToolConformance):
         )
 
 
-class TestRineCheckInboxUnit(_CheckInboxSpec, ToolsUnitTests):
+class TestRineInboxUnit(_InboxSpec, ToolsUnitTests):
     pass
 
 
-class TestRineCheckInboxIntegration(_CheckInboxSpec, ToolsIntegrationTests):
+class TestRineInboxIntegration(_InboxSpec, ToolsIntegrationTests):
     pass
 
 

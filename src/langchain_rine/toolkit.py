@@ -1,6 +1,6 @@
 """``RineToolkit`` — a curated set of rine tools sharing one client.
 
-A ``langchain_core.tools.BaseToolkit`` that builds the requested subset of the 16
+A ``langchain_core.tools.BaseToolkit`` that builds the requested subset of the 25
 tools (via ``include``) and injects ONE lazily-built ``SyncRineClient`` into every
 returned tool (a single ``build_client`` call per toolkit instance). The
 ``config_dir``/``api_url``/``agent`` overrides propagate to each tool so they all
@@ -20,7 +20,7 @@ from pydantic import Field, PrivateAttr
 
 from langchain_rine._client import build_client
 from langchain_rine.tools import (
-    RineCheckInboxTool,
+    RineDiscoverGroupsTool,
     RineDiscoverTool,
     RineFulfillTool,
     RineGroupCreateTool,
@@ -28,7 +28,15 @@ from langchain_rine.tools import (
     RineGroupInvitesTool,
     RineGroupInviteTool,
     RineGroupJoinTool,
+    RineGroupLeaveTool,
+    RineGroupReclaimTool,
     RineGroupRemoveTool,
+    RineGroupRequestsTool,
+    RineGroupRosterTool,
+    RineGroupsTool,
+    RineGroupSyncTool,
+    RineGroupVoteTool,
+    RineInboxTool,
     RineInspectTool,
     RinePayTool,
     RineReadTool,
@@ -36,6 +44,7 @@ from langchain_rine.tools import (
     RineSendAndWaitTool,
     RineSendTool,
     RineThreadTool,
+    RineWhoamiTool,
 )
 
 if TYPE_CHECKING:
@@ -44,19 +53,29 @@ if TYPE_CHECKING:
 _MESSAGING = (
     RineSendTool,
     RineSendAndWaitTool,
-    RineCheckInboxTool,
+    RineInboxTool,
     RineReadTool,
     RineReplyTool,
     RineThreadTool,
 )
-_DISCOVERY = (RineDiscoverTool, RineInspectTool)
+# `rine_whoami` is discovery's odd one out — it is the only authenticated tool in
+# the domain — but it answers the same question the domain exists for: who is out
+# there, and who am I to them.
+_DISCOVERY = (RineDiscoverTool, RineInspectTool, RineDiscoverGroupsTool, RineWhoamiTool)
 _GROUPS = (
+    RineGroupsTool,
     RineGroupCreateTool,
     RineGroupInviteTool,
     RineGroupRemoveTool,
     RineGroupInspectTool,
+    RineGroupRosterTool,
     RineGroupJoinTool,
     RineGroupInvitesTool,
+    RineGroupRequestsTool,
+    RineGroupVoteTool,
+    RineGroupLeaveTool,
+    RineGroupSyncTool,
+    RineGroupReclaimTool,
 )
 # Fund-moving x402 tools live in their OWN domain so `include="messaging"` never silently
 # hands an agent a wallet-spending tool — attaching payments is an explicit opt-in.
@@ -98,7 +117,7 @@ class RineToolkit(BaseToolkit):
     def get_tools(self) -> list[BaseTool]:
         """Build the curated tool subset, all sharing one client.
 
-        ``include="all"`` returns all 16; a single domain name returns that domain's
+        ``include="all"`` returns all 25; a single domain name returns that domain's
         tools; a list returns the union of the named domains. Every tool receives the
         toolkit's overrides plus the single shared ``SyncRineClient`` (one
         ``build_client`` call across the whole toolkit). ``rich_returns`` stays UNWIRED

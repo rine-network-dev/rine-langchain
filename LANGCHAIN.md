@@ -10,14 +10,14 @@
 
 Use the **LangChain 1.0** entry point `create_agent` (NOT the deprecated `create_react_agent`).
 Pins: `langchain-core 1.4.4`, `langchain 1.3.7`, `langgraph 1.2.4`, `langchain-openai 1.3.0`,
-`rine 0.2.2`, Python ≥ 3.11. Examples are async-native (`ainvoke` → the tools' `_arun` path).
+`rine >= 0.11.0`, Python ≥ 3.11. Examples are async-native (`ainvoke` → the tools' `_arun` path).
 
 ```python
 from langchain.agents import create_agent          # langchain 1.0 — NOT create_react_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_rine import RineToolkit
 
-# All 11 tools share ONE lazily-built client. include=["messaging","discovery"] curates a subset.
+# All 25 tools share ONE lazily-built client. include=["messaging","discovery"] curates a subset.
 tools = RineToolkit().get_tools()
 
 agent = create_agent(
@@ -37,21 +37,29 @@ result = await agent.ainvoke(
 Attach individual classes when you want a tight surface (the safe default for mutating agents):
 
 ```python
-from langchain_rine import RineDiscoverTool, RineSendAndWaitTool, RineCheckInboxTool, RineReplyTool
+from langchain_rine import RineDiscoverTool, RineSendAndWaitTool, RineInboxTool, RineReplyTool
 agent = create_agent("openai:gpt-4o-mini",
-                     tools=[RineDiscoverTool(), RineSendAndWaitTool(), RineCheckInboxTool(), RineReplyTool()])
+                     tools=[RineDiscoverTool(), RineSendAndWaitTool(), RineInboxTool(), RineReplyTool()])
 ```
 
-## The 11 tools (names are stable; the descriptions ARE the AI-DX)
+## The 25 tools (names are stable; the descriptions are what the model reads)
 
 - **Messaging:** `rine_send` (1:1 or group; **mutating**), `rine_send_and_wait` (delegate-and-await,
-  **1:1 only**, **mutating**), `rine_check_inbox` (poll new messages + ack), `rine_read`, `rine_reply`
-  (**mutating**).
-- **Discovery (no auth):** `rine_discover`, `rine_inspect`.
-- **Groups (sender-key E2EE):** `rine_group_create` (**mutating**), `rine_group_invite` (**mutating**),
-  `rine_group_remove` (**mutating**), `rine_group_inspect`.
+  **1:1 only**, **mutating**), `rine_inbox` (read a slice of the inbox — `status` is `new`/`delivered`/`read`/`all`, default `new`, and only the `new` slice is acked), `rine_read`, `rine_reply`
+  (**mutating**), `rine_thread` (both-sided transcript of one conversation, or of one group by `group`).
+- **Discovery:** `rine_discover` (no auth), `rine_inspect` (no auth), `rine_discover_groups`
+  (no auth — public-visibility groups only, never a roster), `rine_whoami` (authenticated: this
+  agent's own org, trust tier and live handles).
+- **Groups (post-quantum MLS by default; open-enrollment groups run sender keys):**
+  `rine_groups` (the groups this agent's org belongs to — org-scoped, never narrowed to one
+  agent), `rine_group_create` (**mutating**),
+  `rine_group_invite` (**mutating**), `rine_group_join`
+  (**mutating**), `rine_group_invites`, `rine_group_remove` (**mutating**), `rine_group_inspect`,
+  `rine_group_roster` (handles, roles, join dates), `rine_group_requests`,
+  `rine_group_vote` (**mutating**), `rine_group_leave` (**mutating**),
+  `rine_group_sync`, `rine_group_reclaim` (**mutating**).
 
-## Imperatives — the rine footguns, stated as rules
+## Imperatives — the rules that matter
 
 1. **Onboard ONCE for keys — it is not a tool.** Run
    `python -m langchain_rine.onboard --email you@example.com --org-slug my-org --org-name "My Org" --agent-name worker`
@@ -65,25 +73,25 @@ agent = create_agent("openai:gpt-4o-mini",
 3. **Plaintext is a JSON string `{"text": ...}`.** Every send wraps the body as `{"text": body}`;
    the renderers unwrap the `text` field so the model never sees raw JSON. Do not double-wrap, and
    do not hand the model `encrypted_payload` — the raw ciphertext is **never** read in any renderer.
-4. **MLS / PQ-hybrid is UNREADABLE in Python.** The Python SDK has no MLS engine. An MLS or
-   PQ-hybrid message comes back with `plaintext=None` and `decrypt_error` set, rendered
-   `[unreadable] {err}`; a send to an MLS group raises `MlsUnsupportedError` (a readable tool
-   string), never silent. **Always check `decrypt_error` / `verified` before trusting content.**
-   Run `rine_group_inspect` first — it prints `[OK] sender-key …` (readable) or `[WARN] MLS group …`
-   (this Python agent cannot read or post). To collaborate cross-stack, have your agent create the
-   group (it will be sender-key) or have the TS side create it with MLS disabled.
+4. **Both group kinds are readable here.** The Python SDK reads 1:1 (HPKE + PQ-hybrid),
+   sender-key groups, and post-quantum MLS groups. A message this agent genuinely cannot open
+   (malformed, or sealed to a key it does not hold) comes back `plaintext=None` with
+   `decrypt_error` set, rendered `[unreadable] {err}` — never silent. **Always check
+   `decrypt_error` / `verified` before trusting content.** Run `rine_group_inspect` first — it
+   reports which encryption mode the group uses; both are readable and postable.
 5. **NEVER expose admin / destructive operations as tools.** `onboard`, `erase_org`, `export_org`,
    and streaming (`stream`) are SDK-level operations, not agent tools. Keep them out of the toolkit.
-6. **Group send is `to="#group@org"` on `rine_send` — there is NO separate group-send tool.** A
-   `#`-prefixed target routes `rine_send` through the sender-key path; group messages arrive in
-   `rine_check_inbox` / `rine_read` with its group context shown. `rine_send_and_wait` rejects a
+6. **Group send is `to="#logistics@acme.rine.network"` (or just `to="logistics"`) on `rine_send`
+   — there is NO separate group-send tool.** A `#`-prefixed target routes `rine_send` through
+   the group path — the SDK seals with whatever the group runs, MLS or sender keys. Group messages arrive in
+   `rine_inbox` / `rine_read` with its group context shown. `rine_send_and_wait` rejects a
    `#` target up front ("1:1 only") and makes no network call.
 7. **Errors are readable strings, not exceptions.** Each tool wraps the SDK call and returns a
-   `_format_error` string (auth / not-found / rate-limit / MLS / API) so the agent retries or
-   continues rather than crashing. Treat a tool result that starts with `Rine auth failed`,
-   `Not found:`, `Rate-limited`, or `This group uses MLS …` as an actionable signal, not output.
+   `_format_error` string (auth / not-found / rate-limit / API) so the agent retries or
+   continues rather than crashing. Treat a tool result that starts with `Rine auth failed` or
+   `Not found:` or `Rate-limited` as an actionable signal, not output.
 
-## Lifecycle bridge (native beats MCP)
+## Lifecycle bridge
 
 `RineCallbackHandler` sends a best-effort rine message on selected LangChain lifecycle events — a
 hook an out-of-process MCP server physically cannot reach. Opt-in by instantiation; the client is
@@ -105,7 +113,7 @@ string default is the conformance-safe path; keep it.
 
 ## Receiving while idle
 
-- **Poll on turn:** call `rine_check_inbox` inside the agent loop. Zero new infra.
+- **Poll on turn:** call `rine_inbox` inside the agent loop. Zero new infra.
 - **Delegate and await:** `rine_send_and_wait` blocks ≤ 300s for a 1:1 reply — a
   blocking cross-process sub-call inside a multi-agent graph. Mind your agent/graph timeouts; a `#group`
   target raises before any request.
@@ -113,11 +121,11 @@ string default is the conformance-safe path; keep it.
 ## Idle wake-up for LangGraph (exactly-once)
 
 A `RineThreadResumer` wakes a **paused, durably-checkpointed** LangGraph thread when the peer's
-reply lands. Positioning: *"handoffs that survive process and org boundaries"* — complementary to
-in-process `langgraph-swarm`, not competing.
+reply lands — a handoff that survives process and org boundaries. `langgraph-swarm` hands off
+in-process; `RineThreadResumer` hands off across processes and across orgs.
 
 - **Install the extra:** `pip install langchain-rine[inbound]`. LangGraph is NOT pulled by the base
-  tools; `import langchain_rine` (the 11 tools) never needs it. Importing `langchain_rine.inbound` is
+  tools; `import langchain_rine` (the 25 tools) never needs it. Importing `langchain_rine.inbound` is
   the opt-in. The extra pulls `langgraph`, `langgraph-checkpoint-sqlite`, and `aiosqlite` (the async
   thread-map store); the sync store imports aiosqlite lazily, so a sync-only run never needs it.
 - **Wire it (one block):** a **durable** checkpointer + a durable thread-map + the resumer + a
@@ -144,12 +152,12 @@ in-process `langgraph-swarm`, not competing.
 - **The pitfalls (rules):**
   - A **durable checkpointer is REQUIRED** — `InMemorySaver` loses every parked thread on restart.
     Use `SqliteSaver` + `SqliteThreadMap` in production (`InMemorySaver`/`InMemoryThreadMap` for tests).
-  - Resume is **exactly-once** (v0.3). `SqliteThreadMap` keeps a durable **consumed-message-id
+  - Resume is **exactly-once**. `SqliteThreadMap` keeps a durable **consumed-message-id
     journal** alongside the binding: a message is recorded as consumed *after* the resume commits and
-    *before* the driver acks, so an `mark_delivered` failure (or a process restart) no longer
-    double-resumes a re-armed thread — the redelivery is recognized (`SKIPPED_ALREADY_CONSUMED`) and
+    *before* the driver acks, so a `mark_delivered` failure (or a process restart) does not
+    double-resume a re-armed thread — the redelivery is recognized (`SKIPPED_ALREADY_CONSUMED`) and
     re-acked, never re-resumed. The journal self-cleans on a successful ack, so it stays bounded to
-    in-flight ids. **Residual (narrow):** a crash in the sub-millisecond window between the
+    in-flight ids. **Residual cases:** a crash in the sub-millisecond window between the
     checkpoint commit (inside `invoke`) and the consumed-commit re-resumes on redelivery, and a
     *lost ack response* (server marked delivered, client saw a failure) leaks one bounded journal
     row. If you run **without** the durable store (`InMemoryThreadMap`, or a restart that drops the
@@ -173,7 +181,7 @@ in-process `langgraph-swarm`, not competing.
     coordination stays documented, not enforced.
   - The resumer **auto-unregisters a binding when its thread completes**. A message for an
     unmapped / finished conversation **stays in the inbox by design** — run the resumer ALONGSIDE
-    normal inbox handling (drain stragglers with `rine_check_inbox`); it is NOT a full inbox drain.
+    normal inbox handling (drain stragglers with `rine_inbox`); it is NOT a full inbox drain.
 - **Async-native store:** `SqliteThreadMap` backs the async resume path (`ahandle_inbound` /
   `PollDriver.apoll_once` / `arun`) over a lazily-opened `aiosqlite` connection on the SAME db file
   (WAL), so the async poll loop never blocks the event loop on stdlib `sqlite3`.

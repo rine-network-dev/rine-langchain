@@ -38,7 +38,10 @@ def _mock_groups_list() -> None:
 
 class _GroupCreateSpec(RineToolConformance):
     tool_cls = RineGroupCreateTool
-    invoke_args = {"name": "ops"}
+    # `visibility` is required with no default: a create that omits it
+    # is refused before anything reaches the wire, so the conformance invocation
+    # has to state one like every other caller now does.
+    invoke_args = {"name": "ops", "visibility": "private"}
 
     def install_mocks(self) -> None:
         mock_token()

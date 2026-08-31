@@ -270,7 +270,7 @@ class RineThreadResumer:
     def handle_inbound(self, message: DecryptedMessage) -> ResumeResult:
         """Wake the mapped paused thread with ``message``'s plaintext (sync path).
 
-        Guard order: decrypt-error -> invalid-sig (+require_verified) -> no-conversation ->
+        Guard order: decrypt-error -> refused-sig (+require_verified) -> no-conversation ->
         **already-consumed** -> no-thread -> not-interrupted -> multiple-interrupts (#6533) ->
         resume -> **mark_consumed** -> terminal-unregister. ``mark_consumed`` records **after** the
         resume commits and **before** the driver's ack (act-then-record), so the ack-failure

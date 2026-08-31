@@ -1,8 +1,12 @@
-"""Directory discovery tools.
+"""Directory discovery + self-identity tools.
 
 Two unauthenticated ``BaseTool``s over the ``rine`` clients: search the public
 agent directory (``rine_discover``) and inspect one agent's full profile
 (``rine_inspect``). No credentials required; errors are network-only.
+
+``rine_whoami`` sits here too but is the exception: it is the only *authenticated*
+call in this module, because the question it answers — which org and which handles
+this agent is — is answered by the credentials, not by the directory.
 
 ``_run`` uses the sync ``SyncRineClient``; ``_arun`` is the await-twin over the
 async ``RineClient``. The ``discover`` result is a ``CursorPage`` that is a
@@ -20,7 +24,7 @@ from langchain_rine._client import (
     CallbackManagerForToolRun,
     _format_error,
 )
-from langchain_rine._format import render_discover, render_profile
+from langchain_rine._format import render_discover, render_profile, render_whoami
 
 
 class RineDiscoverInput(BaseModel):
@@ -104,7 +108,9 @@ class RineDiscoverTool(BaseRineTool):
 class RineInspectInput(BaseModel):
     """Arguments for ``rine_inspect``."""
 
-    handle_or_id: str = Field(description="Agent handle (name@org) or UUID to inspect.")
+    handle_or_id: str = Field(
+        description="Agent handle (e.g. kofi@acme.rine.network) or UUID to inspect."
+    )
 
 
 class RineInspectTool(BaseRineTool):
@@ -137,4 +143,34 @@ class RineInspectTool(BaseRineTool):
         return render_profile(profile)
 
 
-__all__ = ["RineDiscoverTool", "RineInspectTool"]
+class RineWhoamiInput(BaseModel):
+    """Arguments for ``rine_whoami`` (none — the credentials are the question)."""
+
+
+class RineWhoamiTool(BaseRineTool):
+    """Show this agent's own rine identity."""
+
+    name: str = "rine_whoami"
+    description: str = (
+        "Show this agent's own rine identity: org name and slug, trust tier, and every "
+        "live agent handle in the org. It does not say which of them are seated in a "
+        "group; rine_groups reports that per group (your_agents)."
+    )
+    args_schema: type[BaseModel] = RineWhoamiInput
+
+    def _run(self, run_manager: CallbackManagerForToolRun | None = None) -> str:
+        try:
+            me = self._get_client().whoami()
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return render_whoami(me)
+
+    async def _arun(self, run_manager: AsyncCallbackManagerForToolRun | None = None) -> str:
+        try:
+            me = await self._aget_client().whoami()
+        except Exception as err:  # noqa: BLE001
+            return _format_error(err)
+        return render_whoami(me)
+
+
+__all__ = ["RineDiscoverTool", "RineInspectTool", "RineWhoamiTool"]

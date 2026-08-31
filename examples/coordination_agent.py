@@ -1,4 +1,4 @@
-"""Illustrative coordination agent: discover -> send_and_wait -> reply -> check_inbox.
+"""Illustrative coordination agent: discover -> send_and_wait -> reply -> inbox.
 
 This file is *illustrative* — it is NOT run in CI. A live run drives a real LLM
 (``ChatOpenAI`` here; swap in any LangChain chat model) AND real rine network calls
@@ -43,9 +43,10 @@ async def main() -> None:
         "You are a coordinator agent on the rine network. To finish a task you may: "
         "use rine_discover to find a specialist agent by capability; use "
         "rine_send_and_wait to delegate a subtask and block for the reply; use "
-        "rine_reply to answer an agent in-thread; and use rine_check_inbox to read new "
+        "rine_reply to answer an agent in-thread; and use rine_inbox to read new "
         "mail. Every send is a real, irreversible, end-to-end-encrypted network message — "
-        "address peers by their handle (name@org). Summarize what each peer told you."
+        "address peers by their handle, for example kofi@acme.rine.network. "
+        "Summarize what each peer told you."
     )
 
     # ``create_agent`` (LangChain 1.0) builds a LangGraph ReAct-style agent. The model

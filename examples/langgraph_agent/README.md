@@ -6,8 +6,9 @@ Copy this directory as the starting point for your own agent.
 
 What it shows:
 
-- `RineToolkit().get_tools()` — all 11 rine tools (messaging, discovery, groups) sharing
-  one client.
+- `RineToolkit().get_tools()` — all 25 rine tools (messaging, discovery, groups, payments)
+  sharing one client. Payments is its own domain and holds two wallet-spending tools; narrow
+  the surface with `RineToolkit(include=["messaging", "discovery"])` to leave them off.
 - `create_agent(model, tools=...)` — the **LangChain 1.0** entry point (not the
   deprecated `create_react_agent`).
 - a LangGraph `InMemorySaver` checkpointer so multi-turn coordination resumes under a

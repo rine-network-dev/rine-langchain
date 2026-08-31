@@ -38,6 +38,10 @@ OTHER_AGENT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 GROUP_ID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
 MESSAGE_ID = "cccccccc-dddd-eeee-ffff-000000000001"
 CONVERSATION_ID = "cccccccc-dddd-eeee-ffff-000000000002"
+# A GROUP's running thread, which is a different object from the 1:1
+# CONVERSATION_ID above: the group one is what GroupRead.conversation_id
+# carries and what rine_thread is handed to read a group's backlog.
+GROUP_CONVERSATION_ID = "cccccccc-dddd-eeee-ffff-000000000003"
 REPLY_ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 WELCOME_ID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 
@@ -55,6 +59,28 @@ AGENT_PAYLOAD = {
     "outgoing_policy": "send_all",
     "created_at": "2024-01-01T00:00:00Z",
 }
+
+# A second agent in the same org — the shape an app that runs more than one
+# persona actually has, and the one under which the SDK refuses to guess which
+# agent a tool call acts as unless something names it.
+SECOND_AGENT_ID = "11111111-2222-3333-4444-555555555555"
+SECOND_AGENT_PAYLOAD = {
+    **AGENT_PAYLOAD,
+    "id": SECOND_AGENT_ID,
+    "name": "second-agent",
+    "handle": "second-agent@myorg.rine.network",
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_acting_agent(monkeypatch):
+    """Keep the developer's own ``RINE_AGENT`` out of every test in this package.
+
+    The SDK client constructor reads it (rung 3 of the ladder), so a machine
+    that exports one would silently give every tool call an actor the test never
+    asked for. A test that wants the env rung sets it itself, after this ran.
+    """
+    monkeypatch.delenv("RINE_AGENT", raising=False)
 
 
 @pytest.fixture
@@ -103,6 +129,60 @@ def mock_agents() -> None:
     respx.get(f"{API_URL}/agents").mock(
         return_value=httpx.Response(200, json={"items": [AGENT_PAYLOAD]})
     )
+
+
+def mock_group_row(group_id: str = GROUP_ID, **payload: Any) -> None:
+    """Stub ``GET /groups/{id}`` — the one indexed read a group reference costs.
+
+    A reference is resolved before it becomes a URL, and a UUID is
+    checked against its own row rather than against a listing. Every verb that
+    takes a group therefore pays this read once, whatever spelling it was given.
+    """
+    import respx
+
+    respx.get(f"{API_URL}/groups/{group_id}").mock(
+        return_value=httpx.Response(200, json=group_payload(group_id=group_id, **payload))
+    )
+
+
+def mock_two_agents() -> None:
+    """Stub ``GET /agents`` with a two-agent org (auto-resolution is refused)."""
+    import respx
+
+    respx.get(f"{API_URL}/agents").mock(
+        return_value=httpx.Response(200, json={"items": [AGENT_PAYLOAD, SECOND_AGENT_PAYLOAD]})
+    )
+
+
+def mock_group_mls_init(group_id: str = GROUP_ID) -> Any:
+    """Stub what a group create fires after ``POST /groups``: MLS founding + re-read.
+
+    Founding opens the init window (``mls/init``) and publishes the founder's init
+    commit (``mls/commit``). Create then **re-reads** the group, because the server
+    latches ``mls_group_id`` after the create response was minted — without that
+    ``GET`` a brand-new MLS group renders as sender-key. The re-read is guarded in
+    the SDK, so leaving it unmocked would not fail a test; it would silently return
+    the unlatched create response.
+
+    Returns the ``mls/init`` route so a caller can assert the founder opened the
+    init window.
+    """
+    import respx
+
+    init = respx.post(f"{API_URL}/groups/{group_id}/mls/init").mock(
+        return_value=httpx.Response(
+            200, json={"members": [{"agent_id": AGENT_ID, "has_key_package": True}]}
+        )
+    )
+    respx.post(f"{API_URL}/groups/{group_id}/mls/commit").mock(
+        return_value=httpx.Response(200, json={"epoch": 1})
+    )
+    respx.get(f"{API_URL}/groups/{group_id}").mock(
+        return_value=httpx.Response(
+            200, json=group_payload(group_id=group_id, mls_enabled=True, mls_group_id="mls-xyz")
+        )
+    )
+    return init
 
 
 def mock_webfinger(handle_uuid: str = OTHER_AGENT_ID) -> None:
@@ -230,6 +310,22 @@ def hpke_self_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
     return encrypt_message(config_dir, AGENT_ID, recipient, payload).encrypted_payload
 
 
+def hpke_peer_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
+    """HPKE-encrypt ``payload`` from OTHER_AGENT_ID to AGENT_ID, signed by the peer.
+
+    A row the server reports as coming from another agent is signed by that agent's
+    own key, so a fixture standing in for a received turn is sealed with the peer's
+    keys — sealing it with the caller's own key would attribute a signature to an
+    agent that did not make it. Needs the ``other_keys`` fixture (peer keys on disk)
+    and ``mock_recipient_keys`` (the peer's published signing key).
+    """
+    # Classical on purpose, matching ``hpke_self_encrypt``: no ML-KEM half, so the
+    # ciphertext stays `hpke-v1` as the fixtures around it declare.
+    own = load_agent_keys(config_dir, AGENT_ID)
+    recipient = RecipientKeys(encryption=own.encryption.public_key)
+    return encrypt_message(config_dir, OTHER_AGENT_ID, recipient, payload).encrypted_payload
+
+
 def decrypt_self_wire(config_dir: str, encrypted_payload_b64: str) -> str:
     """Decrypt a wire ciphertext that was HPKE-sealed to AGENT_ID.
 
@@ -259,7 +355,7 @@ def decrypt_self_wire(config_dir: str, encrypted_payload_b64: str) -> str:
                 )
             )
             return decrypt_message_sync(
-                config_dir, AGENT_ID, encrypted_payload_b64, client._http
+                config_dir, AGENT_ID, encrypted_payload_b64, client._http, AGENT_ID
             ).plaintext
     finally:
         client.close()
@@ -315,22 +411,44 @@ def group_payload(
     handle: str = GROUP_HANDLE,
     group_id: str = GROUP_ID,
     member_count: int = 2,
+    enrollment_policy: str = "closed",
     mls_enabled: bool = False,
     mls_group_id: str | None = None,
     mls_pending: bool = False,
     description: str | None = None,
+    conversation_id: str | None = None,
+    member_agent_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """A ``GroupRead`` payload (server ``/groups`` item shape)."""
+    """A ``GroupRead`` payload (server ``/groups`` item shape).
+
+    ``conversation_id`` defaults to ``None`` and the key is always emitted,
+    which is the server's own shape: it is nullable because a group's
+    conversation is created lazily on its first post, and a group nobody has
+    posted in therefore has none.
+
+    ``member_agent_ids`` defaults to **empty**, and the key is likewise always
+    emitted. Empty is the server's honest answer for a group the org is in but
+    no agent of it is seated in, and defaulting it that way keeps every test
+    that does not care about seats from quietly asserting one.
+
+    ``enrollment_policy`` is an argument because the default pair here —
+    ``closed`` with ``mls_enabled=False`` — is a row no shipped client creates:
+    every create sends ``mls_enabled=True`` and the server column defaults true.
+    A group that really runs sender keys is ``open``, and without this the
+    sender-key arm of every verb was only ever driven on the unreachable row.
+    """
     return {
         "id": group_id,
         "name": name,
         "handle": handle,
         "description": description,
-        "enrollment_policy": "closed",
+        "enrollment_policy": enrollment_policy,
         "visibility": "private",
         "member_count": member_count,
         "created_at": "2024-01-01T00:00:00Z",
         "mls_enabled": mls_enabled,
         "mls_group_id": mls_group_id,
         "mls_pending": mls_pending,
+        "conversation_id": conversation_id,
+        "member_agent_ids": member_agent_ids or [],
     }

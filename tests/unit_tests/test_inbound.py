@@ -91,7 +91,10 @@ def _parallel_b(state: _State) -> dict[str, Any]:
 
 
 def _two_interrupt_graph(saver: InMemorySaver) -> Any:
-    """A graph that fans out to two nodes that BOTH interrupt in one superstep (A7 / #6533)."""
+    """A graph that fans out to two nodes that BOTH interrupt in one superstep.
+
+    The parallel-interrupt superstep this builds is langgraph #6533.
+    """
     builder: StateGraph = StateGraph(_State)
     builder.add_node("a", _parallel_a)
     builder.add_node("b", _parallel_b)
@@ -183,7 +186,8 @@ def _message(
     """Build a real ``DecryptedMessage`` (the resumer operates on these, not raw HTTP).
 
     Defaults to a ``verified`` signature so the resume value is clean plaintext; pass
-    ``verification_status="unverifiable"`` / ``"invalid"`` to exercise the verification gate.
+    ``verification_status="unverifiable"`` / ``"invalid"`` / ``"sender-mismatch"`` to exercise
+    the verification gate.
     """
     return DecryptedMessage(
         id=msg_id,
@@ -309,7 +313,10 @@ class TestResumerGuards:
         assert result.status is ResumeStatus.SKIPPED_NOT_INTERRUPTED
 
     def test_handle_inbound_when_multiple_interrupts_skips_without_bare_resume(self):
-        """A7/#6533: a bare Command(resume) would RuntimeError; the guard must skip, not raise."""
+        """A bare Command(resume) would RuntimeError; the guard must skip, not raise.
+
+        The two nodes interrupt in the same superstep — langgraph #6533.
+        """
         graph = _two_interrupt_graph(InMemorySaver())
         resumer = RineThreadResumer(graph, InMemoryThreadMap())
         resumer.register(SENDER, CONVERSATION_ID, THREAD)
@@ -413,7 +420,7 @@ class TestTerminalUnregister:
 
 
 # =====================================================================
-# Signature-verification gating (a tampered sig never wakes a graph)
+# Signature-verification gating (a refused sig never wakes a graph)
 # =====================================================================
 
 
@@ -432,6 +439,30 @@ class TestVerificationGating:
         assert result.status is ResumeStatus.SKIPPED_UNVERIFIED
         state = graph.get_state({"configurable": {"thread_id": THREAD}})
         assert state.next == ("ask",)  # untouched
+        assert CIPHERTEXT_MARKER not in str(state.values)
+
+    def test_sender_mismatch_signature_is_refused_by_name_not_by_decrypt_error(self):
+        """A SENDER-MISMATCH signature is blocked by the gate itself, with no other guard helping.
+
+        The row carries a real plaintext and NO ``decrypt_error``, so the decrypt-error guard
+        that runs first cannot account for the refusal — only the verification gate can. That is
+        the whole point: a signature that is valid but belongs to an agent other than the sender
+        the server names must never wake a graph, and it must not depend on some other guard
+        happening to fire first.
+        """
+        graph = _single_interrupt_graph(InMemorySaver())
+        resumer = RineThreadResumer(graph, InMemoryThreadMap())
+        resumer.register(SENDER, CONVERSATION_ID, THREAD)
+        _start(graph, THREAD)
+
+        msg = _message(plaintext="signed by someone else", verification_status="sender-mismatch")
+        assert msg.decrypt_error is None  # the refusal is the gate's, not the decrypt guard's
+        result = resumer.handle_inbound(msg)
+
+        assert result.status is ResumeStatus.SKIPPED_UNVERIFIED
+        state = graph.get_state({"configurable": {"thread_id": THREAD}})
+        assert state.next == ("ask",)  # untouched
+        assert "signed by someone else" not in str(state.values)
         assert CIPHERTEXT_MARKER not in str(state.values)
 
     def test_unverifiable_resumes_with_marker_plaintext_no_ciphertext(self):
@@ -848,7 +879,7 @@ def _blocked(*a, **k):
 socket.socket.connect = _blocked
 socket.socket.connect_ex = _blocked
 socket.create_connection = _blocked
-import langchain_rine  # the 11 tools must import with no langgraph + no network
+import langchain_rine  # the 25 tools must import with no langgraph + no network
 from langchain_rine.inbound import RineThreadResumer  # the resumer import must also be inert
 from langchain_rine.drivers import PollDriver
 print("OK")

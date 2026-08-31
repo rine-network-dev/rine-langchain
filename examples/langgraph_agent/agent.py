@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     "You are an agent on the rine network with access to encrypted messaging, directory "
     "discovery, and coordination-group tools. Use rine_discover to find peers, "
     "rine_send / rine_send_and_wait / rine_reply to talk to them (every send is a real, "
-    "irreversible, end-to-end-encrypted network message), rine_check_inbox / rine_read to "
+    "irreversible, end-to-end-encrypted network message), rine_inbox / rine_read to "
     "read mail, and the rine_group_* tools to run sender-key groups. Be explicit about "
     "any irreversible action before you take it."
 )
@@ -41,7 +41,7 @@ SYSTEM_PROMPT = (
 def build_agent() -> object:
     """Build the LangGraph agent: full rine toolkit + an in-memory checkpointer.
 
-    ``RineToolkit().get_tools()`` returns all 11 tools sharing one rine client.
+    ``RineToolkit().get_tools()`` returns all 25 tools sharing one rine client.
     ``create_agent`` (LangChain 1.0) compiles them into a LangGraph agent; the
     ``checkpointer`` persists state per ``thread_id`` so multi-turn coordination resumes.
     """

@@ -10,13 +10,13 @@ audit fixes — FAILED status, verification gating, terminal-unregister — push
   :attr:`~ResumeResult.should_ack` property is the v0.3 ack policy).
 - :func:`default_key_fn` — the ``(handle, conversation_id)`` store-key derivation.
 - :func:`verification_blocks_resume` / :func:`build_human_response` — the
-  signature-verification gate: a *tampered* (``invalid``) signature must
-  never wake a graph; an *unverifiable* one resumes-but-annotated by default, or is
-  *blocked* when the caller opts into ``require_verified``. Both reuse
-  ``_format`` — never the ciphertext.
-- :func:`pre_state_guard` — the **no-I/O** guard chain (decrypt-error → invalid-sig →
-  no-conversation) shared verbatim by the sync ``_resolve`` and async ``_aresolve``
-  paths so neither duplicates the guard logic.
+  signature-verification gate: an *authenticity failure* (``invalid`` or
+  ``sender-mismatch``) must never wake a graph; an *unverifiable* one
+  resumes-but-annotated by default, or is *blocked* when the caller opts into
+  ``require_verified``. Both reuse ``_format`` — never the ciphertext.
+- :func:`pre_state_guard` — the **no-I/O** guard chain (decrypt-error → refused
+  signature → no-conversation) shared verbatim by the sync ``_resolve`` and async
+  ``_aresolve`` paths so neither duplicates the guard logic.
 
 Side-effect-free at import: no network, no client, no langgraph. The
 re-exports in ``inbound.py`` keep ``from langchain_rine.inbound import
@@ -28,6 +28,9 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from rine import is_authenticity_failure
+from rine.sender_key_words import SenderKeyRefusal
 
 from langchain_rine._format import render_message_body
 
@@ -102,13 +105,21 @@ def verification_blocks_resume(
 ) -> bool:
     """Return True iff the signature blocks the resume (never wakes the graph).
 
-    The signature-verification gate. ``invalid`` (tampered/forged) is **always** blocked — a
-    tampered signature must never wake an autonomous graph. ``unverifiable`` (sender key
-    unfetchable) is blocked **only when ``require_verified`` is True** (a strict deployment
-    skips it as ``SKIPPED_UNVERIFIED`` rather than annotate-and-resume); otherwise it is allowed
-    through and :func:`build_human_response` annotates it. ``verified`` is always allowed.
+    The signature-verification gate. An **authenticity failure** is always blocked: the SDK
+    stamps ``invalid`` on a signature that does not cover the bytes and ``sender-mismatch``
+    on one that does but belongs to an agent other than the sender the server names, and
+    neither may wake an autonomous graph. The set is the SDK's own
+    :func:`~rine.is_authenticity_failure` rather than a literal here, so a verdict added to
+    :data:`~rine.VerificationStatus` is blocked the day it ships instead of falling through
+    this gate unnamed.
+
+    ``unverifiable`` is not a finding against the message — no verdict was reached, because
+    the sender's key could not be read — so it is blocked **only when ``require_verified`` is
+    True** (a strict deployment skips it as ``SKIPPED_UNVERIFIED`` rather than
+    annotate-and-resume); otherwise it is allowed through and :func:`build_human_response`
+    annotates it. ``verified`` is always allowed.
     """
-    if message.verification_status == "invalid":
+    if is_authenticity_failure(message.verification_status):
         return True
     return require_verified and message.verification_status == "unverifiable"
 
@@ -119,7 +130,7 @@ def pre_state_guard(
     """Run the **no-I/O** inbound guards shared by the sync + async resume paths.
 
     Returns ``(early, handle, conversation_id)``. A non-None ``early`` is a terminal
-    :class:`ResumeResult` to return directly (decrypt-error / blocked-signature /
+    :class:`ResumeResult` to return directly (decrypt-error / refused signature /
     no-conversation); when ``early`` is None the caller proceeds to the I/O guards
     (already-consumed, thread lookup) with the derived ``handle`` / ``conversation_id``.
 
@@ -141,10 +152,12 @@ def build_human_response(message: DecryptedMessage) -> dict[str, Any]:
     """Agent-Inbox resume payload carrying the (verification-annotated) plaintext + reply ids.
 
     Reuses ``_format.render_message_body`` (the unwrapped plaintext — never the ciphertext).
-    When the sender signature is ``unverifiable``, the content is prefixed with an
-    ``[unverified sender]`` marker so the resumed graph/LLM sees the body is untrusted; a
-    ``verified`` message is passed clean. (An ``invalid`` signature never reaches here — the
-    resumer skips it via :func:`verification_blocks_resume`.)
+    Only a message the SDK actually attributed to its sender is passed clean; anything else
+    is prefixed with an ``[unverified sender]`` marker so the resumed graph/LLM sees the body
+    is untrusted. Keying that on the SDK's own ``verified`` flag rather than on the one
+    ``unverifiable`` status means a verdict added later is marked, not silently trusted. (An
+    authenticity failure never reaches here — the resumer refuses it in
+    :func:`verification_blocks_resume`.)
 
     ``args`` is a dict so the graph's reply node can reply IN-PLACE: it carries
     ``rine_message_id`` (the inbound id, for ``rine_reply(message_id=…)`` which preserves the
@@ -153,8 +166,10 @@ def build_human_response(message: DecryptedMessage) -> dict[str, Any]:
     ``args["text"]`` / ``args["rine_message_id"]``. :meth:`RineThreadResumer.expire` emits the same
     ``{"text": …}`` shape (without ids — a synthetic note has no real message to reply to).
     """
-    body = render_message_body(message)
-    if message.verification_status == "unverifiable":
+    # One inbound message per resume payload — a single-message render, so a fresh
+    # refusal explains a missing sender key in full rather than marking it.
+    body = render_message_body(message, SenderKeyRefusal())
+    if not message.verified:
         body = f"[unverified sender] {body}"
     args = {
         "text": body,

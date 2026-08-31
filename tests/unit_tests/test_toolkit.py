@@ -1,6 +1,6 @@
 """Behavioral tests for RineToolkit.
 
-A toolkit curates a subset of the 16 tools and shares ONE client across them.
+A toolkit curates a subset of the 25 tools and shares ONE client across them.
 These tests assert the curation (``include`` → which tool classes) and the
 shared-client invariant (a single ``build_client`` call per toolkit instance,
 with the config overrides propagated to every returned tool). Import-safety is
@@ -13,9 +13,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from langchain_rine import (
-    RineCheckInboxTool,
+    RineDiscoverGroupsTool,
     RineDiscoverTool,
     RineFulfillTool,
+    RineInboxTool,
     RineInspectTool,
     RinePayTool,
     RineReadTool,
@@ -24,6 +25,7 @@ from langchain_rine import (
     RineSendTool,
     RineThreadTool,
     RineToolkit,
+    RineWhoamiTool,
 )
 
 from ..conftest import API_URL
@@ -31,20 +33,25 @@ from ..conftest import API_URL
 _MESSAGING_CLASSES = {
     RineSendTool,
     RineSendAndWaitTool,
-    RineCheckInboxTool,
+    RineInboxTool,
     RineReadTool,
     RineReplyTool,
     RineThreadTool,
 }
-_DISCOVERY_CLASSES = {RineDiscoverTool, RineInspectTool}
+_DISCOVERY_CLASSES = {
+    RineDiscoverTool,
+    RineInspectTool,
+    RineDiscoverGroupsTool,
+    RineWhoamiTool,
+}
 _PAYMENTS_CLASSES = {RinePayTool, RineFulfillTool}
 
 
 class TestToolkitCuration:
-    def test_default_returns_all_sixteen_tools(self):
-        """The default toolkit exposes all 16 tools (incl. the 2 payment tools)."""
+    def test_default_returns_all_twenty_five_tools(self):
+        """The default toolkit exposes all 25 tools (incl. the 2 payment tools)."""
         tools = RineToolkit().get_tools()
-        assert len(tools) == 16
+        assert len(tools) == 25
 
     def test_include_messaging_returns_exactly_the_messaging_tools(self):
         """include='messaging' returns exactly the messaging tools (no fund tools)."""
@@ -60,6 +67,12 @@ class TestToolkitCuration:
         tools = RineToolkit(include="payments").get_tools()
         assert {type(t) for t in tools} == _PAYMENTS_CLASSES
 
+    def test_include_discovery_returns_exactly_the_four_discovery_tools(self):
+        """include='discovery' returns the agent pair plus group discovery and whoami."""
+        tools = RineToolkit(include="discovery").get_tools()
+        assert {type(t) for t in tools} == _DISCOVERY_CLASSES
+        assert len(tools) == 4
+
     def test_include_list_returns_the_union_of_named_domains(self):
         """A list value returns the union of the named domains."""
         tools = RineToolkit(include=["messaging", "discovery"]).get_tools()
@@ -73,7 +86,7 @@ class TestToolkitSharedClient:
         """A single toolkit instance ⇒ exactly one build_client call.
 
         Spy on the ``build_client`` symbol the toolkit module actually calls and
-        assert it fires once even though 11 tools are produced — they share the
+        assert it fires once even though 25 tools are produced — they share the
         single client, never build their own.
         """
         sentinel = object()

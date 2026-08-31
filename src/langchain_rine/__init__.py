@@ -12,7 +12,7 @@ Public surface:
 
 - Tools — attach the ones an agent needs to ``create_agent(model, tools=[...])``;
   **attachment is the opt-in**. Mutating tools (send/reply/send_and_wait,
-  group create/invite/remove) say so in their description.
+  group create/invite/remove/vote/leave) say so in their description.
 - :class:`RineToolkit` — a curated set of tools sharing one client.
 - :class:`RineCallbackHandler` — opt-in agent/chain-lifecycle → rine message bridge.
 - Onboarding is a setup-time helper (``python -m langchain_rine.onboard``), never a tool.
@@ -26,7 +26,7 @@ from importlib.metadata import PackageNotFoundError, version
 from langchain_rine.callbacks import RineCallbackHandler
 from langchain_rine.toolkit import RineToolkit
 from langchain_rine.tools import (
-    RineCheckInboxTool,
+    RineDiscoverGroupsTool,
     RineDiscoverTool,
     RineFulfillTool,
     RineGroupCreateTool,
@@ -34,7 +34,15 @@ from langchain_rine.tools import (
     RineGroupInvitesTool,
     RineGroupInviteTool,
     RineGroupJoinTool,
+    RineGroupLeaveTool,
+    RineGroupReclaimTool,
     RineGroupRemoveTool,
+    RineGroupRequestsTool,
+    RineGroupRosterTool,
+    RineGroupsTool,
+    RineGroupSyncTool,
+    RineGroupVoteTool,
+    RineInboxTool,
     RineInspectTool,
     RinePayTool,
     RineReadTool,
@@ -42,6 +50,7 @@ from langchain_rine.tools import (
     RineSendAndWaitTool,
     RineSendTool,
     RineThreadTool,
+    RineWhoamiTool,
 )
 
 try:
@@ -53,20 +62,29 @@ __all__ = [
     # messaging
     "RineSendTool",
     "RineSendAndWaitTool",
-    "RineCheckInboxTool",
+    "RineInboxTool",
     "RineReadTool",
     "RineReplyTool",
     "RineThreadTool",
     # discovery
     "RineDiscoverTool",
     "RineInspectTool",
+    "RineDiscoverGroupsTool",
+    "RineWhoamiTool",
     # groups
+    "RineGroupsTool",
     "RineGroupCreateTool",
     "RineGroupInviteTool",
     "RineGroupRemoveTool",
     "RineGroupInspectTool",
+    "RineGroupRosterTool",
     "RineGroupJoinTool",
     "RineGroupInvitesTool",
+    "RineGroupRequestsTool",
+    "RineGroupVoteTool",
+    "RineGroupLeaveTool",
+    "RineGroupSyncTool",
+    "RineGroupReclaimTool",
     # x402 payments
     "RinePayTool",
     "RineFulfillTool",

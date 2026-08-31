@@ -12,7 +12,7 @@ authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
 keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
 # Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
 # "langchain-rine"), so the installed metadata (this literal) is the only version string.
-version = "0.6.0"
+version = "0.8.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -29,11 +29,23 @@ dependencies = [
     # `--override rine @ file:///work/rine-sdk` — see compose.langchain.yml + Dockerfile +
     # entrypoint.sh). That editable SDK carries any unreleased fixes. The published floor
     # below is the *intended* runtime pin; the rig installs ./rine-sdk over this entry,
-    # so the pin is documented, not active in dev. Floored at 0.8.0 so the x402 payee
-    # orchestrator (rine.x402.fulfill) the rine_fulfill tool wraps is guaranteed present;
-    # pip is uncapped, so a fresh install resolves the newest rine (>= 0.9.0). Signing
-    # (rine_pay) needs the SDK's `payments` extra — see the `payments` extra below.
-    "rine>=0.9.0",  # PUBLISHED FLOOR: first rine on the rine-mls core (pre-0.9 lacks the native wheel these tools now need).
+    # so the pin is documented, not active in dev. Signing (rine_pay) needs the SDK's
+    # `payments` extra — see the `payments` extra below.
+    #
+    # PUBLISHED FLOOR 0.11.0, and unlike every floor before it this one is NOT
+    # documentation-grade — it is a hard import requirement. These tools import names the
+    # SDK first exported in 0.11.0 (`describe_mls_admission`, `own_agents_clause`,
+    # `GroupCreateWithRoster`, `GroupTarget`, `VOTE_ELECTORATE_RULE` among others), so
+    # against 0.10.0 `import langchain_rine` raises ImportError at module scope. Lower
+    # this floor and the package does not fail a call — it fails to load.
+    #
+    # 0.11.0 also inherits 0.10.0's reason for existing: it is at or above the first rine
+    # whose send path fetches the recipient's signing key fresh instead of reading a
+    # cached copy, so a peer that rotates its key is sent to under the new key on the very
+    # next message rather than up to ten minutes later. A seal is one-shot and reports
+    # nothing back, so a message sealed to a stale key is simply unreadable for its
+    # recipient — nothing in these tools can detect or retry that.
+    "rine>=0.11.0",
     "langchain-core>=1.0,<2.0",  # exact min verified
     "pydantic>=2.0",
 ]
@@ -46,7 +58,7 @@ Issues = "https://codeberg.org/rine/rine-langchain/issues"
 
 [project.optional-dependencies]
 # v0.2 Tier-3 idle-wake resumer. LangGraph is NOT a core runtime dep — attaching the
-# 11 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
+# 21 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
 # the opt-in; this extra supplies langgraph + the durable sqlite checkpointer the resumer's
 # caller-owned `SqliteSaver` lifecycle needs. (The resumer's own thread-map uses stdlib sqlite3.)
 inbound = [
@@ -58,7 +70,7 @@ inbound = [
 # extra (eth-account). rine_fulfill (payee) does NOT sign — it only needs base `rine`.
 # Install `langchain-rine[payments]` to enable paying.
 payments = [
-    "rine[payments]>=0.9.0",
+    "rine[payments]>=0.11.0",
 ]
 # Pins resolved + verified inside the rig.
 # Resolved set (2026-06-11): langchain-core 1.4.4 · langchain 1.3.7 · langchain-tests 1.1.9 ·
@@ -84,7 +96,12 @@ dev = [
 ]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["phases/", "e2e/", "tests/", "examples/", ".e2e.env", "*.env", ".uv-cache/", ".venv/"]
+# .gitignore does NOT govern sdist contents — this list does. `uv.lock` is excluded
+# for the same reason as in rine-hermes: this lock pins `rine` 0.2.2 while pyproject
+# floors on >=0.11.0, so a contributor who syncs from the sdist installs an SDK that
+# predates `is_authenticity_failure` and fails at import. The sdist's own METADATA
+# carries the real floor; a lock is only ever as fresh as its last re-lock.
+exclude = ["phases/", "e2e/", "tests/", "examples/", ".e2e.env", "*.env", ".uv-cache/", ".venv/", "uv.lock"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/langchain_rine"]
@@ -119,12 +136,25 @@ ignore = ["D100"]
 convention = "google"
 
 [tool.mypy]
-# Matches the rig's actual interpreter (Dockerfile FROM python:3.12-slim). Pinning 3.11
-# made mypy choke parsing numpy's 3.12-only `type X = …` stub syntax before it reached
-# the package. `requires-python` still floors at 3.11 (runtime support is unchanged).
-python_version = "3.12"
+# The type gate checks the LOWEST interpreter this package supports, so
+# `requires-python = ">=3.11"` above is a claim the gate actually validates. The
+# rig's own interpreter is 3.12 (Dockerfile FROM python:3.12-slim); checking at
+# 3.11 there is exactly the point — a 3.12-only construct in this package is a
+# type error a 3.12-only gate would wave through.
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
 packages = ["langchain_rine"]
 mypy_path = "src"
+
+# numpy's installed stub uses PEP 695 `type X = …`, which mypy refuses to parse
+# under `python_version = 3.11`. That is a syntax error in a THIRD-PARTY stub,
+# and mypy treats it as fatal — "errors prevented further checking" — so the
+# whole gate aborts before it reads a line of langchain_rine. Skipping the import
+# (numpy is a transitive dependency of langchain's vector-store tree; this package
+# never names it) keeps the gate running at the floor it ships.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
