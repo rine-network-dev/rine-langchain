@@ -97,10 +97,11 @@ dev = [
 
 [tool.hatch.build.targets.sdist]
 # .gitignore does NOT govern sdist contents — this list does. `uv.lock` is excluded
-# for the same reason as in rine-hermes: this lock pins `rine` 0.2.2 while pyproject
-# floors on >=0.11.0, so a contributor who syncs from the sdist installs an SDK that
-# predates `is_authenticity_failure` and fails at import. The sdist's own METADATA
-# carries the real floor; a lock is only ever as fresh as its last re-lock.
+# for the same reason as in rine-hermes: a lock is only ever as fresh as its last
+# re-lock against a published registry, and this one has drifted behind pyproject's
+# own floor before — far enough that a contributor syncing from the sdist installed
+# an SDK predating `is_authenticity_failure` and failed at import. `uv lock --check`
+# calls a stale lock current, so nothing warns. The sdist's METADATA is the real floor.
 exclude = ["phases/", "e2e/", "tests/", "examples/", ".e2e.env", "*.env", ".uv-cache/", ".venv/", "uv.lock"]
 
 [tool.hatch.build.targets.wheel]
