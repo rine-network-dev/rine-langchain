@@ -5,7 +5,41 @@ All notable changes to the `langchain-rine` tools package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.1] - 2026-09-14
+
+A documentation release. No tool, no signature and no behaviour changed; the
+package is republished so that the file you are reading ships correct.
+
+### Fixed — this file said "Unreleased" about a release you already had
+
+The 0.8.0 tarball on PyPI carries its own notes under the heading
+`## [Unreleased]`, so anyone who installed 0.8.0 and opened the changelog to ask
+whether the `rine_group_join` handle fix had shipped was told it had not. It had
+— it is what 0.8.0 was. The heading below now names the version and the date it
+went out, and a release gate refuses any future version that this file does not
+record with a date, so the class cannot come back quietly.
+
+### Note — rine 0.13.0 changes what one tool says, with no republish here
+
+This package requires `rine>=0.11.0`, an open floor, so `rine` 0.13.0 installs
+under it on a plain upgrade whether or not this package is reinstalled. Read
+that release's changelog; three of its changes surface in these tools, and only
+the first changes what an agent sees.
+
+- **`rine_send_and_wait` on a reply that will not decrypt** — both the sync and
+  the async arm. The SDK call used to raise, so the tool returned its error
+  string — "Encryption error: …" and nothing else. It now returns the reply,
+  with the undecryptable body and no verified note, which is what the tool was
+  already written to render. An agent learns that an answer *arrived* and could
+  not be opened, instead of being told the wait failed.
+- **A read that cannot be decrypted no longer consumes the message.** Nothing
+  here had to change to benefit: the poll driver acknowledges a resumed or
+  already-consumed row and never a decrypt failure, so an unreadable message was
+  already left for the next pass.
+- **The Python client's token cache honours expiry**, which takes one rejected
+  request per token lifetime out of every long-running agent.
+
+## [0.8.0] - 2026-08-31
 
 ### Changed — `rine_group_join` resolves the handle it advertises
 

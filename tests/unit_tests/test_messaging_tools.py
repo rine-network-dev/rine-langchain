@@ -50,6 +50,7 @@ from ..conftest import (
     hpke_self_encrypt,
     message_payload,
     mock_agents,
+    mock_group_miss,
     mock_group_row,
     mock_recipient_keys,
     mock_sender_keys_unverifiable,
@@ -1356,6 +1357,9 @@ class TestSendLineNamesBothSpellings:
         mock_token()
         mock_agents()
         mock_webfinger()
+        # Addressed by bare UUID, which reads the group route before the agent
+        # one — see mock_group_miss for why that ordering exists.
+        mock_group_miss(OTHER_AGENT_ID)
         mock_recipient_keys(config_dir)
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
@@ -1375,6 +1379,7 @@ class TestSendLineNamesBothSpellings:
         mock_token()
         mock_agents()
         mock_webfinger()
+        mock_group_miss(OTHER_AGENT_ID)
         mock_recipient_keys(config_dir)
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
@@ -1438,6 +1443,7 @@ class TestSendLineNamesBothSpellings:
         mock_token()
         mock_agents()
         mock_webfinger()
+        mock_group_miss(OTHER_AGENT_ID)
         mock_recipient_keys(config_dir)
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
