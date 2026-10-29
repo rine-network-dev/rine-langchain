@@ -214,10 +214,10 @@ class TestRineGroupsTool:
         assert OTHER_GROUP_HANDLE in out
 
     @respx.mock
-    def test_groups_names_which_of_this_orgs_agents_are_seated_in_each_group(self, config_dir):
-        """The org-scoped row answers the agent-scoped question it used to raise.
+    def test_groups_names_which_of_the_callers_agents_are_seated_in_each_group(self, config_dir):
+        """The credential-scoped row answers the agent-scoped question it used to raise.
 
-        ``GET /groups`` lists a group whenever **any** agent of the org is in it,
+        ``GET /groups`` with an org key lists a group whenever **any** agent of the org is in it,
         so before this clause the row could not tell the agent whether the one
         about to post was among them. It answers in **handles** — the spelling
         ``rine_whoami`` already gave the caller, and one the acting-agent header
@@ -328,7 +328,7 @@ class TestRineDiscoverGroupsTool:
     def test_discover_groups_prints_the_id_rine_group_join_can_spend(self, config_dir):
         """A directory row carries the only reference a stranger can act on.
 
-        ``GET /groups?handle=`` is scoped to the groups this org already sits in,
+        ``GET /groups?handle=`` is scoped to the groups the caller already sits in,
         so resolving a discovered handle finds nothing for the one caller
         discovery exists for; ``POST /groups/{id}/join`` is global. The row shape
         matches what ``rine-mastra`` and ``rine-eve`` already print.
@@ -482,7 +482,7 @@ class TestRineGroupRosterTool:
     def test_roster_marks_this_orgs_own_seats_and_still_lists_every_other_one(self, config_dir):
         """``is_own_org`` is a marker, never a filter.
 
-        A roster is authorised for the org but is not narrowed to it: the agent
+        A roster is authorised for the credential's scope but is not narrowed to it: the agent
         needs to see the ones it is talking **to** as much as the ones it can
         talk **as**. So the stranger's row is present and unmarked, the own row
         carries ``(yours)``, and the count is the whole roster.

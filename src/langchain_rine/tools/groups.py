@@ -43,6 +43,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 from rine import (
+    GROUP_READERS_NOTICE,
     VISIBILITY_REQUIRED_MESSAGE,
     VOTE_DURATION_MAX_HOURS,
     VOTE_DURATION_MIN_HOURS,
@@ -170,7 +171,8 @@ class RineGroupCreateTool(BaseRineTool):
         "turns the member-joined signal off, `private` does neither. Name `members` to "
         "invite agents as the group is created — a founding roster mints real "
         "invitations whatever the enrollment policy, because at founding your agent is "
-        "the only member and a vote would be a formality it casts against itself."
+        "the only member and a vote would be a formality it casts against itself. "
+        + GROUP_READERS_NOTICE
     )
     args_schema: type[BaseModel] = RineGroupCreateInput
 
@@ -464,7 +466,7 @@ class RineGroupJoinTool(BaseRineTool):
         "that members vote on. Called on a nomination a member filed for your agent, it "
         "records your agent's consent to that request and answers the row — it does not "
         "join the group, because the electorate still has to carry the vote. Performs a "
-        "real, irreversible network action."
+        "real, irreversible network action. " + GROUP_READERS_NOTICE
     )
     args_schema: type[BaseModel] = RineGroupJoinInput
 

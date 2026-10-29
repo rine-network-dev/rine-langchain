@@ -9,6 +9,8 @@ socket *connections* disabled to prove a side-effect-free import.
 
 from __future__ import annotations
 
+import base64
+import json
 import subprocess
 import sys
 
@@ -16,7 +18,8 @@ import httpx
 import pytest
 import respx
 from rine import ACTING_AGENT_SPELLING, AGENT_HEADER
-from rine._config import save_credentials
+from rine._principal import agent_principal
+from rine.testing import write_agent_identity
 
 import langchain_rine
 from langchain_rine import RineGroupsTool, RineSendTool
@@ -69,7 +72,7 @@ class TestErrorMapping:
         The public directory answers only ``visibility == "public"``, so naming it
         alone sends a member of a PRIVATE group to a search that structurally
         cannot resolve their group. ``rine_groups`` lists every group the caller's
-        org holds a seat in, public or private, which is what a mistyped handle on
+        credential can see, public or private, which is what a mistyped handle on
         a send almost always is. The ORDER is deliberate, so it is asserted.
 
         The detail here is the server's own bare literal — the one 404 that still
@@ -216,73 +219,75 @@ class TestErrorMapping:
 # --- config resolution precedence ---
 
 
+def _token_request(token) -> tuple[dict[str, str], dict[str, object]]:
+    """The first sign-in's form body and the claims of the assertion it carried."""
+    body = dict(httpx.QueryParams(token.calls[0].request.content.decode()))
+    segment = body["client_assertion"].split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+    return body, claims
+
+
+def _sign_in_through_inbox(config_dir: str):
+    """Run one authenticated tool call against stubbed routes; return the token route."""
+    from langchain_rine import RineInboxTool
+
+    token = respx.post(f"{API_URL}/oauth/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "t", "expires_in": 900})
+    )
+    mock_agents()
+    respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
+        return_value=httpx.Response(200, json={"items": [], "total": 0})
+    )
+    respx.post(f"{API_URL}/agents/{AGENT_ID}/messages/mark-delivered").mock(
+        return_value=httpx.Response(200, json={"marked": 0})
+    )
+    RineInboxTool(config_dir=config_dir, api_url=API_URL).invoke({})
+    return token
+
+
 class TestConfigResolution:
     @respx.mock
-    def test_env_credentials_beat_config_dir_file(self, tmp_path, monkeypatch):
-        """RINE_CLIENT_ID/SECRET env wins over a different client_id in the file."""
+    def test_sign_in_is_a_key_assertion_with_no_client_secret(self, tmp_path):
+        """The token request proves the agent key; there is no secret to send."""
         cdir = str(tmp_path)
-        save_credentials(cdir, {"default": {"client_id": "file-cid", "client_secret": "file-sec"}})
+        write_agent_identity(cdir, AGENT_ID)
+
+        token = _sign_in_through_inbox(cdir)
+
+        body, claims = _token_request(token)
+        assert claims["iss"] == str(agent_principal(AGENT_ID))
+        assert "client_secret" not in body
+        assert "client_id" not in body
+
+    @respx.mock
+    def test_legacy_client_env_vars_are_ignored(self, tmp_path, monkeypatch):
+        """RINE_CLIENT_ID/SECRET no longer steer sign-in, whatever they hold."""
+        cdir = str(tmp_path)
+        write_agent_identity(cdir, AGENT_ID)
         monkeypatch.setenv("RINE_CLIENT_ID", "env-cid")
         monkeypatch.setenv("RINE_CLIENT_SECRET", "env-sec")
 
-        token = respx.post(f"{API_URL}/oauth/token").mock(
-            return_value=httpx.Response(200, json={"access_token": "t", "expires_in": 900})
-        )
-        mock_agents()
-        respx.get(f"{API_URL}/directory/agents/{'a' * 8}").mock(
-            return_value=httpx.Response(404, json={"detail": "x"})
-        )
+        token = _sign_in_through_inbox(cdir)
 
-        # Any authenticated call triggers the token fetch; inspect a tool that auths.
-        from langchain_rine import RineInboxTool
-
-        respx.get(f"{API_URL}/agents/00000000-1111-2222-3333-444444444444/messages").mock(
-            return_value=httpx.Response(200, json={"items": [], "total": 0})
-        )
-        respx.post(
-            f"{API_URL}/agents/00000000-1111-2222-3333-444444444444/messages/mark-delivered"
-        ).mock(return_value=httpx.Response(200, json={"marked": 0}))
-        RineInboxTool(config_dir=cdir, api_url=API_URL).invoke({})
-
-        assert token.called
-        body = dict(httpx.QueryParams(token.calls[0].request.content.decode()))
-        assert body["client_id"] == "env-cid"  # env creds used, not file creds
+        body, claims = _token_request(token)
+        assert claims["iss"] == str(agent_principal(AGENT_ID))
+        assert "env-sec" not in token.calls[0].request.content.decode()
+        assert "client_secret" not in body
 
     @respx.mock
     def test_constructor_config_dir_overrides_env_config_dir(self, tmp_path, monkeypatch):
         """The tool's config_dir kwarg takes precedence over RINE_CONFIG_DIR env."""
         good = tmp_path / "good"
         good.mkdir()
-        save_credentials(
-            str(good), {"default": {"client_id": "good-cid", "client_secret": "good-sec"}}
-        )
-        # env points at an EMPTY dir; constructor points at the good one.
+        write_agent_identity(str(good), AGENT_ID)
         empty = tmp_path / "empty"
         empty.mkdir()
         monkeypatch.setenv("RINE_CONFIG_DIR", str(empty))
 
-        token = respx.post(f"{API_URL}/oauth/token").mock(
-            return_value=httpx.Response(200, json={"access_token": "t", "expires_in": 900})
-        )
-        mock_agents()
-        respx.get(f"{API_URL}/directory/agents").mock(
-            return_value=httpx.Response(200, json={"items": [], "total": 0})
-        )
+        token = _sign_in_through_inbox(str(good))
 
-        # discover is unauthenticated; use an authenticated path to force creds read.
-        from langchain_rine import RineInboxTool
-
-        respx.get(f"{API_URL}/agents/00000000-1111-2222-3333-444444444444/messages").mock(
-            return_value=httpx.Response(200, json={"items": [], "total": 0})
-        )
-        respx.post(
-            f"{API_URL}/agents/00000000-1111-2222-3333-444444444444/messages/mark-delivered"
-        ).mock(return_value=httpx.Response(200, json={"marked": 0}))
-        RineInboxTool(config_dir=str(good), api_url=API_URL).invoke({})
-
-        assert token.called
-        body = dict(httpx.QueryParams(token.calls[0].request.content.decode()))
-        assert body["client_id"] == "good-cid"  # constructor dir won over env dir
+        _, claims = _token_request(token)
+        assert claims["iss"] == str(agent_principal(AGENT_ID))
 
 
 # --- which agent a tool acts as ---
@@ -407,7 +412,7 @@ class TestImportSafety:
         """The Python SDK has no RINE_TOKEN; the package must not invent one.
 
         String-absence proof: ``RINE_TOKEN`` appears in none of the package's source
-        files (it is not a config knob — auth is client_id/client_secret only).
+        files (it is not a config knob — auth is the agent's own key assertion only).
         """
         import pathlib
 

@@ -36,7 +36,7 @@ GROUP_REFERENCE = (
 #: :data:`GROUP_REFERENCE`.
 #:
 #: 🔴 **The rule itself is the SDK's, imported and never retyped.** ``join``'s
-#: reference rules are not the shared ones — a handle walks three rungs, and a
+#: reference rules are not the shared ones — a handle walks four rungs, and a
 #: bare name is read against this agent's pending invitations and nowhere wider,
 #: deliberately refusing a network-wide search that would feed an irreversible
 #: verb. All five connectors advertise the same rule, so it lives in

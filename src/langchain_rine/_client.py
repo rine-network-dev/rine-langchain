@@ -1,8 +1,8 @@
 """Shared config/auth resolver and tool base for langchain-rine.
 
 One place every tool gets its ``rine`` client from. The resolution chain is the
-SDK's, untouched: ``RINE_CLIENT_ID``+``RINE_CLIENT_SECRET`` env →
-``RINE_CONFIG_DIR`` env → ``~/.config/rine`` → ``cwd/.rine``. We do **not** reimplement
+SDK's, untouched: ``RINE_CONFIG_DIR`` env → ``~/.config/rine`` → ``cwd/.rine``, the first
+directory holding a ``profiles.json``. We do **not** reimplement
 that chain — the SDK's clients resolve it when ``config_dir``/``api_url``/``agent`` are
 left at their defaults. This module only:
 
@@ -56,10 +56,10 @@ def build_client(
     """Build a ``SyncRineClient``, passing only the non-``None`` overrides.
 
     Any override left ``None`` is omitted so the SDK resolves it via its own chain
-    (env creds → ``RINE_CONFIG_DIR`` → ``~/.config/rine`` → ``cwd/.rine``). Shared by
+    (``RINE_CONFIG_DIR`` → ``~/.config/rine`` → ``cwd/.rine``). Shared by
     ``BaseRineTool._get_client`` and the callback handler's ``_get_client`` (same contract).
     """
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {"agent_only": True}
     if config_dir is not None:
         kwargs["config_dir"] = config_dir
     if api_url is not None:
@@ -75,7 +75,7 @@ def abuild_client(*, config_dir: str | None, api_url: str | None, agent: str | N
     The async twin of :func:`build_client`: same omit-``None`` semantics so the SDK
     resolves any unset override via its own chain. Used by ``_arun`` paths.
     """
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {"agent_only": True}
     if config_dir is not None:
         kwargs["config_dir"] = config_dir
     if api_url is not None:
@@ -145,7 +145,7 @@ def _not_found_message(detail: str) -> str:
     org's agents by name, and that list is the answer. ``rine_discover`` reads
     the unauthenticated, org-agnostic public directory, so it cannot say which of
     the caller's own agents it may act as. A missing **group** is handed to
-    ``rine_groups`` first: it lists every group this org holds a seat in, public
+    ``rine_groups`` first: it lists every group the key can see, public
     and private alike, and a mistyped handle on a send is almost always a group
     the caller is already in. ``rine_discover_groups`` is named second because it
     searches the public directory only — the one place that finds a public group
@@ -154,7 +154,7 @@ def _not_found_message(detail: str) -> str:
     ``rine_discover`` is for.
 
     ``rine_groups`` is dropped when the refusal already carries that verb's own
-    answer. The SDK lists the org's groups inside its group refusals —
+    answer. The SDK lists the groups the key can see inside its group refusals —
     :data:`rine.GROUP_ROSTER_LEAD` introduces the roster, and
     :data:`rine.NO_GROUPS_IN_ORG` is the arm for an org that holds a seat
     nowhere — so naming ``rine_groups`` underneath one of those tells a caller
@@ -217,8 +217,8 @@ def _format_error(err: Exception) -> str:
     """
     if isinstance(err, AuthenticationError):
         return (
-            "Rine auth failed — set RINE_CLIENT_ID/RINE_CLIENT_SECRET or onboard "
-            "(`python -m langchain_rine.onboard`)."
+            "Rine auth failed — onboard (`python -m langchain_rine.onboard`). "
+            "A host clock more than 30 s off also fails sign-in."
         )
     if isinstance(err, NotFoundError):
         return _not_found_message(err.detail)
@@ -253,7 +253,7 @@ class BaseRineTool(BaseTool):
         """Build (once) and return the shared ``SyncRineClient``.
 
         Passes only the override fields through; when they are ``None`` the SDK resolves
-        them via its own chain (env creds → ``RINE_CONFIG_DIR`` → ``~/.config/rine`` →
+        them via its own chain (``RINE_CONFIG_DIR`` → ``~/.config/rine`` →
         ``cwd/.rine``). We never reimplement that resolution here.
         """
         if self._client is None:

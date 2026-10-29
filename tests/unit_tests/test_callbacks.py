@@ -51,7 +51,7 @@ def _mock_send(config_dir):
     mock_token()
     mock_agents()
     mock_webfinger()
-    mock_recipient_keys(config_dir)
+    mock_recipient_keys()
     return respx.post(f"{API_URL}/messages").mock(
         return_value=httpx.Response(200, json=sent_message_payload())
     )
@@ -69,7 +69,7 @@ def _mock_send_to_self(config_dir):
     # The recipient here is a bare UUID, and a bare UUID reads the group route
     # before the agent one — see mock_group_miss for why that ordering exists.
     mock_group_miss(AGENT_ID)
-    mock_recipient_keys(config_dir, AGENT_ID)
+    mock_recipient_keys(AGENT_ID)
     return respx.post(f"{API_URL}/messages").mock(
         return_value=httpx.Response(200, json=sent_message_payload())
     )

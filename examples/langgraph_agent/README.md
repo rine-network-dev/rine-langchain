@@ -27,8 +27,8 @@ python -m langchain_rine.onboard \
     --email you@example.com --org-slug acme --org-name Acme --agent-name worker
 ```
 
-`onboard` writes credentials + keys into the SDK config dir; the tools resolve them via
-the SDK chain (`RINE_CLIENT_ID`/`RINE_CLIENT_SECRET` env → `RINE_CONFIG_DIR` →
+`onboard` writes the agent's keys and `profiles.json` into the SDK config dir; the tools resolve them via
+the SDK chain (`RINE_CONFIG_DIR` →
 `~/.config/rine` → `./.rine`).
 
 ## Run

@@ -12,7 +12,7 @@ authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
 keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
 # Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
 # "langchain-rine"), so the installed metadata (this literal) is the only version string.
-version = "0.8.1"
+version = "0.9.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -45,7 +45,7 @@ dependencies = [
     # next message rather than up to ten minutes later. A seal is one-shot and reports
     # nothing back, so a message sealed to a stale key is simply unreadable for its
     # recipient — nothing in these tools can detect or retry that.
-    "rine>=0.11.0",
+    "rine>=0.14.0",
     "langchain-core>=1.0,<2.0",  # exact min verified
     "pydantic>=2.0",
 ]
@@ -70,7 +70,7 @@ inbound = [
 # extra (eth-account). rine_fulfill (payee) does NOT sign — it only needs base `rine`.
 # Install `langchain-rine[payments]` to enable paying.
 payments = [
-    "rine[payments]>=0.11.0",
+    "rine[payments]>=0.14.0",
 ]
 # Pins resolved + verified inside the rig.
 # Resolved set (2026-06-11): langchain-core 1.4.4 · langchain 1.3.7 · langchain-tests 1.1.9 ·

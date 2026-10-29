@@ -23,14 +23,14 @@ from typing import Any
 import httpx
 import respx
 from rine._constants import MessageType
-from rine._crypto.dm_envelope import RecipientKeys
-from rine._crypto.keys import load_agent_keys
 from rine._crypto.message import encrypt_message
 from rine._crypto.wallet import save_wallet_key
-from rine.x402 import PaymentPolicy, save_policy
+from rine.testing import WORLD
+from rine.x402 import PaymentPolicy, X402Error, X402ErrorCode, read_daily_spent, save_policy
 from rine.x402.types import X402_QUOTE_REF_KEY
 
 from langchain_rine import RineFulfillTool, RinePayTool
+from langchain_rine.tools.payments import _status_for_error
 
 from ..conftest import (
     AGENT_ID,
@@ -38,10 +38,11 @@ from ..conftest import (
     MESSAGE_ID,
     OTHER_AGENT_ID,
     REPLY_ID,
-    hpke_self_encrypt,
+    hpke_self_blob,
     message_payload,
     mock_agents,
     mock_recipient_keys,
+    mock_sender_keys_unverifiable,
     mock_token,
     sent_message_payload,
 )
@@ -55,11 +56,9 @@ def _seal(config_dir: str, payload: dict[str, Any]) -> str:
     ``/agents/{OTHER_AGENT_ID}/keys`` via ``mock_recipient_keys``). Requires the
     ``other_keys`` fixture (peer keys on disk).
     """
-    # Classical on purpose: the recipient's ML-KEM half is left out so this helper
-    # keeps producing `hpke-v1`, which is what the fixtures around it declare.
-    own = load_agent_keys(config_dir, AGENT_ID)
-    recipient = RecipientKeys(encryption=own.encryption.public_key)
-    return encrypt_message(config_dir, OTHER_AGENT_ID, recipient, payload).encrypted_payload
+    return encrypt_message(
+        config_dir, OTHER_AGENT_ID, WORLD.verified(AGENT_ID), payload
+    ).encrypted_payload
 
 
 # The payee-issued quote a received payment answers — a DIFFERENT message from the
@@ -121,7 +120,7 @@ def _mock_quote(config_dir: str, amount: str = "500000", *, msg_type: str | None
         return_value=httpx.Response(
             200,
             json=message_payload(
-                encryption_version="hpke-v1",
+                encryption_version="hpke-hybrid-v2",
                 encrypted_payload=ciphertext,
                 msg_id=MESSAGE_ID,
                 from_agent_id=OTHER_AGENT_ID,  # payee = quote sender
@@ -154,7 +153,7 @@ class TestRinePayHappyPath:
         """A payable quote → payment-submitted, the signed x402_payment posted to reply."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)  # payee (OTHER_AGENT_ID) keys, to encrypt the payment
+        mock_recipient_keys()  # payee (OTHER_AGENT_ID) keys, to encrypt the payment
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         route = _mock_reply()
@@ -171,7 +170,7 @@ class TestRinePayHappyPath:
         """The posted reply is a rine.v1.x402_payment carrying opaque ciphertext."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         route = _mock_reply()
@@ -187,7 +186,7 @@ class TestRinePayHappyPath:
         """The cleartext marker carries {status, rail} only — the amount never leaks (inv.2)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir, amount="500000")
         route = _mock_reply()
@@ -205,7 +204,7 @@ class TestRinePayHappyPath:
         """emit_marker=False sends a fully-sealed payment (no cleartext marker)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         route = _mock_reply()
@@ -220,7 +219,7 @@ class TestRinePayHappyPath:
         """The async path submits the payment identically."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         route = _mock_reply()
@@ -243,7 +242,7 @@ class TestRinePayRefusals:
         """A non-x402 message → not-payment-required, nothing signed or sent."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir, msg_type=MessageType.TASK_REQUEST)
         route = _mock_reply()
@@ -258,7 +257,7 @@ class TestRinePayRefusals:
         """A valid quote but no wallet on disk → no-wallet (never touches the network)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir, policy=False)
         # remove the wallet: install policy only
         import os
@@ -277,7 +276,7 @@ class TestRinePayRefusals:
         """Deny-by-default: a wallet but no spend policy → policy-refused, no send."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir, policy=False)  # wallet but NO policy
         _mock_quote(config_dir)
         route = _mock_reply()
@@ -292,7 +291,7 @@ class TestRinePayRefusals:
         """auto_pay + above autoPayThreshold → above-auto-pay-threshold; no send, no debit."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)  # threshold 1.00
         _mock_quote(config_dir, amount="2000000")  # 2.00 EURC > 1.00 threshold
         route = _mock_reply()
@@ -307,11 +306,33 @@ class TestRinePayRefusals:
         assert "status: payment-submitted" in out2
 
     @respx.mock
+    def test_pay_when_quote_sender_unverifiable_returns_sender_unverifiable(
+        self, config_dir, other_keys
+    ):
+        """A quote whose sender cannot be verified is never signed against or debited."""
+        mock_token()
+        mock_agents()
+        mock_sender_keys_unverifiable(OTHER_AGENT_ID)
+        _install_wallet(config_dir)
+        _mock_quote(config_dir)
+        route = _mock_reply()
+
+        out = _pay_tool(config_dir).invoke({"message_id": MESSAGE_ID})
+
+        assert "status: sender-unverifiable" in out
+        assert not route.called
+        assert read_daily_spent(config_dir, AGENT_ID) == 0
+
+    def test_pay_status_when_quote_not_signed_by_sender_is_inauthentic_quote(self):
+        err = X402Error(X402ErrorCode.INAUTHENTIC_SENDER, "re-sealed")
+        assert _status_for_error(err) == "status: inauthentic-quote — re-sealed"
+
+    @respx.mock
     def test_pay_repeat_same_quote_returns_already_paid(self, config_dir, other_keys):
         """Paying the same quote twice → already-paid on the second call (once-per-message)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         _mock_reply()
@@ -327,7 +348,7 @@ class TestRinePayRefusals:
         """allow_repay bypasses the once-per-message guard (a deliberate second debit)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         _install_wallet(config_dir)
         _mock_quote(config_dir)
         _mock_reply()
@@ -396,7 +417,7 @@ def _mock_payment(
         return_value=httpx.Response(
             200,
             json=message_payload(
-                encryption_version="hpke-v1",
+                encryption_version="hpke-hybrid-v2",
                 encrypted_payload=ciphertext,
                 msg_id=MESSAGE_ID,
                 from_agent_id=OTHER_AGENT_ID,  # payer = message sender
@@ -416,13 +437,13 @@ def _mock_referenced_quote(config_dir: str) -> None:
     ``AGENT_ID``'s keys are served too because the payee verifies the (own) sender
     signature on that quote before trusting a byte of it.
     """
-    mock_recipient_keys(config_dir, AGENT_ID)
+    mock_recipient_keys(AGENT_ID)
     respx.get(f"{API_URL}/messages/{QUOTE_ID}").mock(
         return_value=httpx.Response(
             200,
             json={
                 **message_payload(
-                    encryption_version="hpke-v1",
+                    encryption_version="hpke-hybrid-v2",
                     encrypted_payload="ZHVtbXk=",  # payer's copy — unreadable to the payee
                     msg_id=QUOTE_ID,
                     from_agent_id=AGENT_ID,  # the payee issued this quote
@@ -430,7 +451,7 @@ def _mock_referenced_quote(config_dir: str) -> None:
                     msg_type=MessageType.X402_PAYMENT_REQUIRED,
                 ),
                 "direction": "sent",
-                "self_encrypted_payload": hpke_self_encrypt(config_dir, _payment_required()),
+                "self_encrypted_payload": hpke_self_blob(config_dir, _payment_required()),
             },
         )
     )
@@ -446,7 +467,7 @@ class TestRineFulfill:
         """Valid verify → settle → payment-completed receipt threaded to the payer."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)  # payer keys, to encrypt the receipt
+        mock_recipient_keys()  # payer keys, to encrypt the receipt
         respx.post(f"{FAC_URL}/verify").mock(
             return_value=httpx.Response(200, json={"isValid": True, "payer": SIGNED_PAYER})
         )
@@ -467,11 +488,29 @@ class TestRineFulfill:
         assert "base-sepolia" in out  # v1 slug surfaced verbatim
 
     @respx.mock
+    def test_fulfill_when_payment_sender_unverifiable_sends_nothing(self, config_dir, other_keys):
+        """A sender check that could not run settles nothing and sends no receipt."""
+        mock_token()
+        mock_agents()
+        mock_sender_keys_unverifiable(OTHER_AGENT_ID)
+        facilitator = respx.post(url__startswith=FAC_URL)
+        _mock_payment(config_dir)
+        reply = _mock_reply()
+
+        out = _fulfill_tool(config_dir).invoke(
+            {"message_id": MESSAGE_ID, "facilitator_url": FAC_URL}
+        )
+
+        assert out.startswith("status: sender-unverifiable")
+        assert not facilitator.called
+        assert not reply.called
+
+    @respx.mock
     def test_fulfill_receipt_marker_is_status_rail_only(self, config_dir, other_keys):
         """The receipt's cleartext marker is {status, rail}-only — no economics leak."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{FAC_URL}/verify").mock(
             return_value=httpx.Response(200, json={"isValid": True})
         )
@@ -492,7 +531,7 @@ class TestRineFulfill:
         """A failed verification is a business outcome: settle skipped, payment-failed receipt."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{FAC_URL}/verify").mock(
             return_value=httpx.Response(
                 200, json={"isValid": False, "invalidReason": "insufficient_funds"}
@@ -519,7 +558,7 @@ class TestRineFulfill:
         """Fail closed: a payment bound to no payee-issued quote never reaches the facilitator."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         verify = respx.post(f"{FAC_URL}/verify")
         settle = respx.post(f"{FAC_URL}/settle")
         _mock_payment(config_dir, quote_ref=None)
@@ -543,7 +582,7 @@ class TestRineFulfill:
         """A non-x402_payment message → a clear error string; the facilitator is never hit."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         verify = respx.post(f"{FAC_URL}/verify")
         _mock_payment(config_dir, msg_type=MessageType.TASK_REQUEST)
 
@@ -559,7 +598,7 @@ class TestRineFulfill:
         """The async path settles and reports payment-completed identically."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{FAC_URL}/verify").mock(
             return_value=httpx.Response(200, json={"isValid": True})
         )

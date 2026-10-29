@@ -48,7 +48,7 @@ class _SendSpec(RineToolConformance):
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(self._cfg)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )
@@ -71,7 +71,7 @@ class _SendAndWaitSpec(RineToolConformance):
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(self._cfg)
+        mock_recipient_keys()
         # No reply within the window → the deterministic timeout-string path.
         respx.post(f"{API_URL}/messages/sync").mock(
             return_value=httpx.Response(
@@ -157,14 +157,14 @@ class _ReplySpec(RineToolConformance):
             return_value=httpx.Response(
                 200,
                 json=message_payload(
-                    encryption_version=EncryptionVersion.HPKE_V1,
+                    encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
                     encrypted_payload="ZHVtbXk=",
                     from_agent_id=OTHER_AGENT_ID,
                     to_agent_id=AGENT_ID,
                 ),
             )
         )
-        mock_recipient_keys(self._cfg)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages/{MESSAGE_ID}/reply").mock(
             return_value=httpx.Response(200, json={**sent_message_payload(), "id": REPLY_ID})
         )

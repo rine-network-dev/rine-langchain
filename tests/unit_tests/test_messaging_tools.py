@@ -22,6 +22,7 @@ import httpx
 import respx
 from rine import TRANSCRIPT_REFERENCE_REQUIRED, not_a_conversation_uuid
 from rine._constants import EncryptionVersion, MessageType
+from rine.testing import WORLD
 
 from langchain_rine import (
     RineInboxTool,
@@ -47,6 +48,7 @@ from ..conftest import (
     establish_mls_group_state,
     group_payload,
     hpke_peer_encrypt,
+    hpke_self_blob,
     hpke_self_encrypt,
     message_payload,
     mock_agents,
@@ -77,7 +79,7 @@ class TestRineSendTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )
@@ -98,7 +100,7 @@ class TestRineSendTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )
@@ -117,7 +119,7 @@ class TestRineSendTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )
@@ -125,7 +127,7 @@ class TestRineSendTool:
         _send_tool(config_dir).invoke({"to": OTHER_HANDLE, "body": "hello there"})
 
         body = json.loads(route.calls[0].request.content)
-        assert body["encryption_version"] == EncryptionVersion.HPKE_V1
+        assert body["encryption_version"] == EncryptionVersion.HPKE_HYBRID_V2
         assert "encrypted_payload" in body
         assert "hello there" not in route.calls[0].request.content.decode()
 
@@ -140,7 +142,7 @@ class TestRineSendTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )
@@ -202,7 +204,7 @@ class TestRineSendTool:
         # as. That half used to say a bare name was neither, which stopped being
         # true the day bare names resolved.
         assert "#logistics@acme.rine.network" in out
-        assert "A bare name is read as a group this org is seated in" in out
+        assert "A bare name is read as a group you hold a seat in" in out
         assert "rine_discover_groups" in out
 
     @respx.mock
@@ -302,7 +304,7 @@ def _send_and_wait_reply_response(reply_ct):
     return {
         "message": sent_message_payload(),
         "reply": message_payload(
-            encryption_version=EncryptionVersion.HPKE_V1,
+            encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
             encrypted_payload=reply_ct,
             msg_id=REPLY_ID,
             from_agent_id=AGENT_ID,
@@ -319,11 +321,11 @@ class TestRineSendAndWaitTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         # Reply is HPKE-encrypted to the caller agent so it decrypts to readable text.
         reply_ct = hpke_self_encrypt(config_dir, {"text": "ack: done"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.post(f"{API_URL}/messages/sync").mock(
             return_value=httpx.Response(200, json=_send_and_wait_reply_response(reply_ct))
@@ -349,10 +351,10 @@ class TestRineSendAndWaitTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         reply_ct = hpke_self_encrypt(config_dir, {"text": "ack: done"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.post(f"{API_URL}/messages/sync").mock(
             return_value=httpx.Response(200, json=_send_and_wait_reply_response(reply_ct))
@@ -380,7 +382,7 @@ class TestRineSendAndWaitTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         reply_ct = hpke_self_encrypt(config_dir, {"text": "maybe done"})
         # Sender signing-key fetch fails → reply is unverifiable (but still decrypts).
         mock_sender_keys_unverifiable()  # GET /agents/{AGENT_ID}/keys → 503
@@ -402,7 +404,7 @@ class TestRineSendAndWaitTool:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages/sync").mock(
             return_value=httpx.Response(
                 200,
@@ -457,27 +459,12 @@ class TestRineSendAndWaitTool:
         assert isinstance(out, str)
 
 
-def _self_keys_json(config_dir):
-    from rine._crypto.keys import (
-        encryption_public_key_to_jwk,
-        load_agent_keys,
-        signing_public_key_to_jwk,
-    )
-
-    keys = load_agent_keys(config_dir, AGENT_ID)
-    return {
-        "agent_id": AGENT_ID,
-        "encryption_public_key": encryption_public_key_to_jwk(keys.encryption.public_key),
-        "signing_public_key": signing_public_key_to_jwk(keys.signing.public_key),
-    }
-
-
 # =====================================================================
 # RineInboxTool
 # =====================================================================
 
 
-def _inbox_response(ciphertext, encryption_version=EncryptionVersion.HPKE_V1):
+def _inbox_response(ciphertext, encryption_version=EncryptionVersion.HPKE_HYBRID_V2):
     """A single-item ``/agents/{id}/messages`` page carrying one message."""
     return {
         "items": [
@@ -496,7 +483,7 @@ class TestRineInboxTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "inbox hello"})
         inbox_route = respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -524,7 +511,7 @@ class TestRineInboxTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "inbox hello"})
         inbox_route = respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -546,7 +533,7 @@ class TestRineInboxTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "ack me"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -572,7 +559,7 @@ class TestRineInboxTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "still here"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -677,14 +664,14 @@ class TestRineReadTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "read me"})
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(
                 200,
                 json=message_payload(
-                    encryption_version=EncryptionVersion.HPKE_V1,
+                    encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
                     encrypted_payload=ciphertext,
                 ),
             )
@@ -709,14 +696,14 @@ class TestRineReadTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "read me"})
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(
                 200,
                 json=message_payload(
-                    encryption_version=EncryptionVersion.HPKE_V1,
+                    encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
                     encrypted_payload=ciphertext,
                 ),
             )
@@ -747,7 +734,7 @@ class TestRineReadTool:
             return_value=httpx.Response(
                 200,
                 json=message_payload(
-                    encryption_version=EncryptionVersion.HPKE_V1,
+                    encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
                     encrypted_payload=ciphertext,
                 ),
             )
@@ -814,7 +801,7 @@ class TestRineReadTool:
 def _received_row(received_ct):
     """One ``direction="received"`` peer turn the caller can decrypt."""
     row = message_payload(
-        encryption_version=EncryptionVersion.HPKE_V1,
+        encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
         encrypted_payload=received_ct,
         from_agent_id=OTHER_AGENT_ID,
         to_agent_id=AGENT_ID,
@@ -827,7 +814,7 @@ def _received_row(received_ct):
 def _sent_row(self_ct):
     """One ``direction="sent"`` self turn the caller opens via ``self_encrypted_payload``."""
     row = message_payload(
-        encryption_version=EncryptionVersion.HPKE_V1,
+        encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
         encrypted_payload="ZHVtbXk=",  # peer-sealed copy the sender cannot open
         from_agent_id=AGENT_ID,
         to_agent_id=OTHER_AGENT_ID,
@@ -840,7 +827,7 @@ def _sent_row(self_ct):
 def _unavailable_sent_row():
     """A ``direction="sent"`` row with no self-blob → renders ``[unavailable]``."""
     row = message_payload(
-        encryption_version=EncryptionVersion.HPKE_V1,
+        encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
         encrypted_payload="ZHVtbXk=",
         from_agent_id=AGENT_ID,
         to_agent_id=OTHER_AGENT_ID,
@@ -861,9 +848,9 @@ class TestRineThreadTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         # A received turn the caller can actually decrypt (sealed to AGENT_ID).
         received_ct = hpke_peer_encrypt(config_dir, {"text": "peer turn one"})
         respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
@@ -883,9 +870,9 @@ class TestRineThreadTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         received_ct = hpke_peer_encrypt(config_dir, {"text": "peer turn one"})
         respx.get(f"{API_URL}/conversations/{CONVERSATION_ID}/messages").mock(
             return_value=httpx.Response(200, json=_thread_page(received_ct))
@@ -922,10 +909,10 @@ class TestRineThreadTool:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
-        mock_recipient_keys(config_dir)
-        sent_ct = hpke_self_encrypt(config_dir, {"text": "my turn one"})
+        mock_recipient_keys()
+        sent_ct = hpke_self_blob(config_dir, {"text": "my turn one"})
         received_ct = hpke_peer_encrypt(config_dir, {"text": "peer turn one"})
         page = {
             "messages": [
@@ -962,7 +949,7 @@ class TestRineThreadToolByGroup:
     def test_thread_by_group_handle_reads_the_groups_own_route(self, config_dir, other_keys):
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         received_ct = hpke_peer_encrypt(config_dir, {"text": "the delivery is booked"})
         respx.get(f"{API_URL}/groups").mock(
             return_value=httpx.Response(200, json={"items": [group_payload()]})
@@ -985,7 +972,7 @@ class TestRineThreadToolByGroup:
         """``.ainvoke`` reads the same group by the same reference (same mock)."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         received_ct = hpke_peer_encrypt(config_dir, {"text": "the delivery is booked"})
         respx.get(f"{API_URL}/groups").mock(
             return_value=httpx.Response(200, json={"items": [group_payload()]})
@@ -1073,7 +1060,7 @@ class TestRineThreadToolByGroup:
         """A UUID is already the id the route takes — resolving it would be a wasted call."""
         mock_token()
         mock_agents()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         mock_group_row()
         directory = respx.get(f"{API_URL}/groups").mock(
             return_value=httpx.Response(200, json={"items": [group_payload()]})
@@ -1143,7 +1130,7 @@ class TestRineThreadToolContract:
 def _original_message_for_reply():
     """The ``GET /messages/{id}`` original ``reply()`` fetches to find the sender."""
     return message_payload(
-        encryption_version=EncryptionVersion.HPKE_V1,
+        encryption_version=EncryptionVersion.HPKE_HYBRID_V2,
         encrypted_payload="ZHVtbXk=",
         from_agent_id=OTHER_AGENT_ID,
         to_agent_id=AGENT_ID,
@@ -1159,7 +1146,7 @@ class TestRineReplyTool:
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(200, json=_original_message_for_reply())
         )
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages/{MESSAGE_ID}/reply").mock(
             return_value=httpx.Response(200, json={**sent_message_payload(), "id": REPLY_ID})
         )
@@ -1179,7 +1166,7 @@ class TestRineReplyTool:
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(200, json=_original_message_for_reply())
         )
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         route = respx.post(f"{API_URL}/messages/{MESSAGE_ID}/reply").mock(
             return_value=httpx.Response(200, json={**sent_message_payload(), "id": REPLY_ID})
         )
@@ -1198,7 +1185,7 @@ class TestRineReplyTool:
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(200, json=_original_message_for_reply())
         )
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages/{MESSAGE_ID}/reply").mock(
             return_value=httpx.Response(
                 200,
@@ -1257,7 +1244,7 @@ class TestRineInboxStatus:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "old news"})
         route = respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -1279,7 +1266,7 @@ class TestRineInboxStatus:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "old news"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -1299,7 +1286,7 @@ class TestRineInboxStatus:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "everything"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -1319,7 +1306,7 @@ class TestRineInboxStatus:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         ciphertext = hpke_self_encrypt(config_dir, {"text": "old news"})
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
@@ -1360,7 +1347,7 @@ class TestSendLineNamesBothSpellings:
         # Addressed by bare UUID, which reads the group route before the agent
         # one — see mock_group_miss for why that ordering exists.
         mock_group_miss(OTHER_AGENT_ID)
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
                 200, json={**sent_message_payload(), "recipient_handle": OTHER_HANDLE}
@@ -1380,7 +1367,7 @@ class TestSendLineNamesBothSpellings:
         mock_agents()
         mock_webfinger()
         mock_group_miss(OTHER_AGENT_ID)
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
                 200, json={**sent_message_payload(), "recipient_handle": OTHER_HANDLE}
@@ -1399,7 +1386,7 @@ class TestSendLineNamesBothSpellings:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
                 200, json={**sent_message_payload(), "recipient_handle": OTHER_HANDLE}
@@ -1425,7 +1412,7 @@ class TestSendLineNamesBothSpellings:
         mock_token()
         mock_agents()
         mock_webfinger()
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(
                 200, json={**sent_message_payload(), "recipient_handle": ""}
@@ -1444,7 +1431,7 @@ class TestSendLineNamesBothSpellings:
         mock_agents()
         mock_webfinger()
         mock_group_miss(OTHER_AGENT_ID)
-        mock_recipient_keys(config_dir)
+        mock_recipient_keys()
         respx.post(f"{API_URL}/messages").mock(
             return_value=httpx.Response(200, json=sent_message_payload())
         )

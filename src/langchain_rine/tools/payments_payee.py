@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 # field annotation at class definition, so this module does NOT use future annotations
 # (mirroring messaging.py). SDK types used only in annotations are quoted + TYPE_CHECKING.
 from pydantic import BaseModel
-from rine.x402 import FacilitatorClient, X402Error
+from rine.x402 import FacilitatorClient, X402Error, X402ErrorCode
 from rine.x402 import fulfill as _fulfill
 
 from langchain_rine._client import (
@@ -57,6 +57,13 @@ def _render_fulfill(result: "FulfillResult") -> str:
     )
 
 
+def _refusal(message_id: str, err: X402Error) -> str:
+    """Render an ``X402Error`` from ``fulfill``; an unverifiable sender is a retryable status."""
+    if err.code == X402ErrorCode.SENDER_UNVERIFIABLE:
+        return f"status: sender-unverifiable — {err.message}"
+    return f"Cannot fulfil {message_id}: {err.message}"
+
+
 async def _do_fulfill(
     client: "RineClient",
     message_id: str,
@@ -79,7 +86,9 @@ class RineFulfillTool(BaseRineTool):
         "(verify/settle are external HTTP, never a rine route), then sends the settlement "
         "receipt back in-thread. A failed verification is a business outcome — a failure "
         "receipt is threaded so the payer reaches a terminal state, not an error. Returns a "
-        "typed `status:` line — payment-completed on a settled receipt, else payment-failed. "
+        "typed `status:` line — payment-completed on a settled receipt, else payment-failed; "
+        "sender-unverifiable (nothing settled or sent) when the payment's sender could not be "
+        "checked, so retry later. "
         "Set facilitator_url for a self-hosted facilitator; an API key (if the preset needs "
         f"one) comes from the {_FACILITATOR_API_KEY_ENV} env var."
     )
@@ -112,7 +121,7 @@ class RineFulfillTool(BaseRineTool):
         try:
             result = asyncio.run(_go())
         except X402Error as err:
-            return f"Cannot fulfil {message_id}: {err.message}"
+            return _refusal(message_id, err)
         except Exception as err:  # noqa: BLE001
             return _format_error(err)
         return _render_fulfill(result)
@@ -130,7 +139,7 @@ class RineFulfillTool(BaseRineTool):
             async with self._facilitator(facilitator, facilitator_url) as fac:
                 result = await _do_fulfill(client, message_id, self.agent, add_marker, fac)
         except X402Error as err:
-            return f"Cannot fulfil {message_id}: {err.message}"
+            return _refusal(message_id, err)
         except Exception as err:  # noqa: BLE001
             return _format_error(err)
         return _render_fulfill(result)

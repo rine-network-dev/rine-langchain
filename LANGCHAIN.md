@@ -51,7 +51,7 @@ agent = create_agent("openai:gpt-4o-mini",
   (no auth — public-visibility groups only, never a roster), `rine_whoami` (authenticated: this
   agent's own org, trust tier and live handles).
 - **Groups (post-quantum MLS by default; open-enrollment groups run sender keys):**
-  `rine_groups` (the groups this agent's org belongs to — org-scoped, never narrowed to one
+  `rine_groups` (the groups your key can see — an org key's are the org's, never narrowed to one
   agent), `rine_group_create` (**mutating**),
   `rine_group_invite` (**mutating**), `rine_group_join`
   (**mutating**), `rine_group_invites`, `rine_group_remove` (**mutating**), `rine_group_inspect`,
@@ -63,12 +63,11 @@ agent = create_agent("openai:gpt-4o-mini",
 
 1. **Onboard ONCE for keys — it is not a tool.** Run
    `python -m langchain_rine.onboard --email you@example.com --org-slug my-org --org-name "My Org" --agent-name worker`
-   at setup time. It registers an org via a ~30–60s proof-of-work and writes credentials + keys
-   into the config dir. A PoW does not belong inside an LLM turn — NEVER expose onboarding as a tool.
-2. **Env creds alone authenticate but CANNOT decrypt.** `RINE_CLIENT_ID` + `RINE_CLIENT_SECRET`
-   get you authenticated, but E2EE decrypt/sign need the **private keys on disk** at
-   `config_dir/keys/<agent>/{signing.key,encryption.key}` (written by `onboard` / `create_agent` /
-   `rotate_keys`). "Just set two env vars" is half-true unless the keys are present. There is **no
+   at setup time. It registers an org via a ~30–60s proof-of-work and writes the agent's keys and
+   `profiles.json` into the config dir, and `root.key` plus the recovery phrase into the owner dir. A PoW does not belong inside an LLM turn — NEVER expose onboarding as a tool.
+2. **There is no client secret.** Sign-in uses the agent's own key, and E2EE decrypt/sign need the
+   **private keys on disk** at `config_dir/keys/<agent>/` (written by `onboard` / `create_agent` /
+   `rotate_keys`). There is **no
    `RINE_TOKEN`** — that is a Node/MCP-only concept; do not look for it.
 3. **Plaintext is a JSON string `{"text": ...}`.** Every send wraps the body as `{"text": body}`;
    the renderers unwrap the `text` field so the model never sees raw JSON. Do not double-wrap, and

@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from rine.a2a_cleartext import with_a2a_cleartext_notice
+
 # One definition per language: the SDK owns the predicate, so a group renders the
 # same way on every surface. Every consumer imports it from the SDK — this module
 # is a renderer, not a pass-through.
@@ -109,7 +111,7 @@ def render_message_body(msg: DecryptedMessage, refusal: SenderKeyRefusal) -> str
         return f"[unreadable] {refusal.text_for(msg) or msg.decrypt_error}"
     if msg.plaintext is None:
         return "[no plaintext]"
-    return _unwrap_text(msg.plaintext)
+    return with_a2a_cleartext_notice(msg, _unwrap_text(msg.plaintext))
 
 
 def _unwrap_text(plaintext: str) -> str:

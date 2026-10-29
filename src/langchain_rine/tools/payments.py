@@ -50,6 +50,10 @@ def _status_for_error(err: X402Error) -> str:
         return f"status: already-paid — {err.message}"
     if err.code == X402ErrorCode.WALLET_BUSY:
         return f"status: wallet-busy — {err.message}"
+    if err.code == X402ErrorCode.INAUTHENTIC_SENDER:
+        return f"status: inauthentic-quote — {err.message}"
+    if err.code == X402ErrorCode.SENDER_UNVERIFIABLE:
+        return f"status: sender-unverifiable — {err.message}"
     reason = err.details.get("reason")
     detail = reason if isinstance(reason, str) else err.code
     return f"status: policy-refused — {detail}: {err.message}"
@@ -108,6 +112,7 @@ def _resolve_pay(
             config_dir,
             agent_id,
             pr,
+            quote=quote,
             message_id=str(quote.id),
             force=allow_repay,
             add_marker=emit_marker,
@@ -138,7 +143,9 @@ class RinePayTool(BaseRineTool):
         "Does NOT wait for settlement — the receipt arrives later as an ordinary inbox "
         "message (read it with rine_read / rine_inbox / rine_thread). Returns a typed "
         "`status:` line — payment-submitted / no-wallet / not-payment-required / "
-        "policy-refused / above-auto-pay-threshold / already-paid / wallet-busy."
+        "policy-refused / above-auto-pay-threshold / already-paid / wallet-busy / "
+        "inauthentic-quote (the quote was not signed by the agent that sent it) / "
+        "sender-unverifiable (the sender check could not run: nothing was paid, retry later)."
     )
     args_schema: type[BaseModel] = RinePayInput
 

@@ -18,17 +18,10 @@ from typing import Any
 import httpx
 import pytest
 from rine import SyncRineClient
-from rine._config import save_credentials
 from rine._constants import MessageType
-from rine._crypto.dm_envelope import RecipientKeys
-from rine._crypto.keys import (
-    encryption_public_key_to_jwk,
-    generate_agent_keys,
-    load_agent_keys,
-    save_agent_keys,
-    signing_public_key_to_jwk,
-)
+from rine._crypto.keys import save_agent_keys
 from rine._crypto.message import decrypt_message_sync, encrypt_message
+from rine.testing import WORLD, write_agent_identity
 
 API_URL = "https://rine.network"
 
@@ -92,20 +85,18 @@ def config_dir(tmp_path) -> str:
     away, only the HTTP boundary is.
     """
     cdir = str(tmp_path)
-    save_credentials(cdir, {"default": {"client_id": "cid", "client_secret": "csecret"}})
-    save_agent_keys(cdir, AGENT_ID, generate_agent_keys())
+    write_agent_identity(cdir, AGENT_ID)
     return cdir
 
 
 @pytest.fixture
 def other_keys(config_dir):
-    """Generate + persist the recipient agent's keys; return them.
+    """Persist the recipient agent's derived keys under the caller's config dir; return them.
 
-    Persisted under the same config dir so a self-mocked ``/keys`` fetch returns
-    a real public key and a real HPKE round-trip is possible in tests that need
-    plaintext back.
+    Persisted there so a peer-sealed message can be opened by the same client and
+    a real post-quantum round-trip is possible in tests that need plaintext back.
     """
-    keys = generate_agent_keys()
+    keys = WORLD.keys(OTHER_AGENT_ID)
     save_agent_keys(config_dir, OTHER_AGENT_ID, keys)
     return keys
 
@@ -183,6 +174,40 @@ def mock_two_agents() -> None:
     )
 
 
+def mock_mls_group_services(
+    group_id: str = GROUP_ID, member_ids: tuple[str, ...] = (AGENT_ID, OTHER_AGENT_ID)
+) -> None:
+    """Stub what an MLS flow reads from the server beside the group's own routes.
+
+    The group tree (members and live invitations), the batch key read that admits
+    peers into the allowed set, the acting agent's branch escrow key, and the escrow
+    upload. Everything answers with chain-valid bodies from the shared test org.
+    """
+    import respx
+
+    respx.get(f"{API_URL}/groups/{group_id}/members").mock(
+        return_value=httpx.Response(200, json={"items": [{"agent_id": m} for m in member_ids]})
+    )
+    respx.get(f"{API_URL}/groups/{group_id}/requests").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+
+    def _batch(request: httpx.Request) -> httpx.Response:
+        ids = request.url.params.get("ids", "").split(",")
+        return httpx.Response(200, json={"keys": {i: WORLD.keys_response(i) for i in ids if i}})
+
+    respx.get(f"{API_URL}/agents/keys").mock(side_effect=_batch)
+    respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
+        return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
+    )
+    respx.get(url__regex=rf"{API_URL}/orgs/me/branches/[^/]+/escrow-key").mock(
+        return_value=httpx.Response(200, json=WORLD.escrow_response())
+    )
+    respx.put(url__regex=rf"{API_URL}/groups/{group_id}/mls/escrow/\d+").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+
 def mock_group_mls_init(group_id: str = GROUP_ID) -> Any:
     """Stub what a group create fires after ``POST /groups``: MLS founding + re-read.
 
@@ -211,6 +236,7 @@ def mock_group_mls_init(group_id: str = GROUP_ID) -> Any:
             200, json=group_payload(group_id=group_id, mls_enabled=True, mls_group_id="mls-xyz")
         )
     )
+    mock_mls_group_services(group_id, (AGENT_ID,))
     return init
 
 
@@ -223,20 +249,12 @@ def mock_webfinger(handle_uuid: str = OTHER_AGENT_ID) -> None:
     )
 
 
-def mock_recipient_keys(config_dir: str, agent_id: str = OTHER_AGENT_ID) -> None:
-    """Stub ``GET /agents/{id}/keys`` with the persisted recipient public key."""
+def mock_recipient_keys(agent_id: str = OTHER_AGENT_ID) -> None:
+    """Stub ``GET /agents/{id}/keys`` with the agent's chain-valid published keys."""
     import respx
 
-    keys = load_agent_keys(config_dir, agent_id)
     respx.get(f"{API_URL}/agents/{agent_id}/keys").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "agent_id": agent_id,
-                "encryption_public_key": encryption_public_key_to_jwk(keys.encryption.public_key),
-                "signing_public_key": signing_public_key_to_jwk(keys.signing.public_key),
-            },
-        )
+        return_value=httpx.Response(200, json=WORLD.keys_response(agent_id))
     )
 
 
@@ -279,6 +297,7 @@ def establish_mls_group_state(config_dir: str) -> None:
     )
 
     # Mint + capture AGENT_ID's KeyPackage (public half) the founder will admit.
+    mock_mls_group_services()
     kp_route = respx.post(f"{API_URL}/agents/{AGENT_ID}/mls/key-packages").mock(
         return_value=httpx.Response(201, json={"stored": 10})
     )
@@ -291,7 +310,8 @@ def establish_mls_group_state(config_dir: str) -> None:
 
         # A real second agent founds the group admitting AGENT_ID's KeyPackage.
         peer_dir = f"{config_dir}/_peer"
-        save_agent_keys(peer_dir, OTHER_AGENT_ID, generate_agent_keys())
+        save_agent_keys(peer_dir, OTHER_AGENT_ID, WORLD.keys(OTHER_AGENT_ID))
+        save_agent_keys(peer_dir, AGENT_ID, WORLD.keys(AGENT_ID))
         peer = open_mls_client(peer_dir, OTHER_AGENT_ID)
         group = peer.create_group_with_members(mls_group_id_bytes(GROUP_ID), [key_package])
         group.save()
@@ -326,21 +346,26 @@ def establish_mls_group_state(config_dir: str) -> None:
 
 
 def hpke_self_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
-    """HPKE-encrypt ``payload`` from AGENT_ID to AGENT_ID (self-readable).
+    """Seal ``payload`` from AGENT_ID to AGENT_ID (self-readable), ``hpke-hybrid-v2``.
 
     Returns the base64url ciphertext — used to build a message the caller agent
     can actually decrypt, so plaintext + ciphertext-invariant assertions run the
     real crypto path.
     """
-    # Classical on purpose: the recipient's ML-KEM half is left out so this helper
-    # keeps producing `hpke-v1`, which is what the fixtures around it declare.
-    own = load_agent_keys(config_dir, AGENT_ID)
-    recipient = RecipientKeys(encryption=own.encryption.public_key)
-    return encrypt_message(config_dir, AGENT_ID, recipient, payload).encrypted_payload
+    return encrypt_message(
+        config_dir, AGENT_ID, WORLD.verified(AGENT_ID), payload
+    ).encrypted_payload
+
+
+def hpke_self_blob(config_dir: str, payload: dict[str, Any]) -> str:
+    """AGENT_ID's own copy (``self_encrypted_payload``) of a turn it sent to OTHER_AGENT_ID."""
+    return encrypt_message(
+        config_dir, AGENT_ID, WORLD.verified(OTHER_AGENT_ID), payload
+    ).self_encrypted_payload
 
 
 def hpke_peer_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
-    """HPKE-encrypt ``payload`` from OTHER_AGENT_ID to AGENT_ID, signed by the peer.
+    """Seal ``payload`` from OTHER_AGENT_ID to AGENT_ID, signed by the peer.
 
     A row the server reports as coming from another agent is signed by that agent's
     own key, so a fixture standing in for a received turn is sealed with the peer's
@@ -348,40 +373,27 @@ def hpke_peer_encrypt(config_dir: str, payload: dict[str, Any]) -> str:
     agent that did not make it. Needs the ``other_keys`` fixture (peer keys on disk)
     and ``mock_recipient_keys`` (the peer's published signing key).
     """
-    # Classical on purpose, matching ``hpke_self_encrypt``: no ML-KEM half, so the
-    # ciphertext stays `hpke-v1` as the fixtures around it declare.
-    own = load_agent_keys(config_dir, AGENT_ID)
-    recipient = RecipientKeys(encryption=own.encryption.public_key)
-    return encrypt_message(config_dir, OTHER_AGENT_ID, recipient, payload).encrypted_payload
+    return encrypt_message(
+        config_dir, OTHER_AGENT_ID, WORLD.verified(AGENT_ID), payload
+    ).encrypted_payload
 
 
 def decrypt_self_wire(config_dir: str, encrypted_payload_b64: str) -> str:
-    """Decrypt a wire ciphertext that was HPKE-sealed to AGENT_ID.
+    """Decrypt a wire ciphertext that was sealed to AGENT_ID.
 
     The inverse of :func:`hpke_self_encrypt`. Used to read back the *content* a
     tool/listener actually put on the wire (e.g. the handler's agent-name + verb
     notification text) without trusting the tool's own formatter — proves the real
-    encrypted body, not just that *a* POST happened. Sender verification is skipped
-    by returning a 503 on the sender-keys fetch (caller mocks that), so this returns
-    the raw decrypted plaintext string regardless of verification status.
+    encrypted body, not just that *a* POST happened. Returns the raw decrypted
+    plaintext string regardless of verification status.
     """
     import respx
 
-    keys = load_agent_keys(config_dir, AGENT_ID)
     client = SyncRineClient(config_dir=config_dir, api_url=API_URL)
     try:
         with respx.mock:
             respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={
-                        "agent_id": AGENT_ID,
-                        "encryption_public_key": encryption_public_key_to_jwk(
-                            keys.encryption.public_key
-                        ),
-                        "signing_public_key": signing_public_key_to_jwk(keys.signing.public_key),
-                    },
-                )
+                return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
             )
             return decrypt_message_sync(
                 config_dir, AGENT_ID, encrypted_payload_b64, client._http, AGENT_ID
@@ -428,7 +440,7 @@ def sent_message_payload(
         "to_agent_id": to_agent_id,
         "type": MessageType.TASK_REQUEST,
         "encrypted_payload": encrypted_payload,
-        "encryption_version": "hpke-v1",
+        "encryption_version": "hpke-hybrid-v2",
         "sender_signing_kid": f"rine:{AGENT_ID}",
         "created_at": "2024-01-01T00:00:00Z",
     }

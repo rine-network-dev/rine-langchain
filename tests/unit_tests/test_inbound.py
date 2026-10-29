@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from rine import DecryptedMessage
+from rine.testing import WORLD
 
 from langchain_rine._threadmap import InMemoryThreadMap
 from langchain_rine.drivers import PollDriver, make_webhook_handler
@@ -606,7 +607,7 @@ def _inbox_two_messages(config_dir: str) -> dict[str, Any]:
         "to_agent_id": AGENT_ID,
         "type": "rine.v1.task_response",
         "encrypted_payload": hpke_self_encrypt(config_dir, {"text": "mapped reply"}),
-        "encryption_version": "hpke-v1",
+        "encryption_version": "hpke-hybrid-v2",
         "sender_signing_kid": f"rine:{AGENT_ID}",
         "sender_handle": SENDER,
         "created_at": "2024-01-01T00:00:00Z",
@@ -637,7 +638,7 @@ def _inbox_one_mapped(config_dir: str, *, text: str = "mapped reply") -> dict[st
                 "to_agent_id": AGENT_ID,
                 "type": "rine.v1.task_response",
                 "encrypted_payload": hpke_self_encrypt(config_dir, {"text": text}),
-                "encryption_version": "hpke-v1",
+                "encryption_version": "hpke-hybrid-v2",
                 "sender_signing_kid": f"rine:{AGENT_ID}",
                 "sender_handle": SENDER,
                 "created_at": "2024-01-01T00:00:00Z",
@@ -647,28 +648,13 @@ def _inbox_one_mapped(config_dir: str, *, text: str = "mapped reply") -> dict[st
     }
 
 
-def _self_keys_json(config_dir: str) -> dict[str, Any]:
-    from rine._crypto.keys import (
-        encryption_public_key_to_jwk,
-        load_agent_keys,
-        signing_public_key_to_jwk,
-    )
-
-    keys = load_agent_keys(config_dir, AGENT_ID)
-    return {
-        "agent_id": AGENT_ID,
-        "encryption_public_key": encryption_public_key_to_jwk(keys.encryption.public_key),
-        "signing_public_key": signing_public_key_to_jwk(keys.signing.public_key),
-    }
-
-
 class TestPollDriver:
     @respx.mock
     def test_poll_once_acks_only_resumed_messages(self, config_dir):
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_two_messages(config_dir))
@@ -700,7 +686,7 @@ class TestPollDriver:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_two_messages(config_dir))
@@ -723,7 +709,7 @@ class TestPollDriver:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_two_messages(config_dir))
@@ -757,7 +743,7 @@ class TestPollDriverFailureIsolation:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_two_messages(config_dir))
@@ -809,7 +795,7 @@ def _webhook_message(config_dir: str, *, text: str = "webhook reply") -> dict[st
         "to_agent_id": AGENT_ID,
         "type": "rine.v1.task_response",
         "encrypted_payload": hpke_self_encrypt(config_dir, {"text": text}),
-        "encryption_version": "hpke-v1",
+        "encryption_version": "hpke-hybrid-v2",
         "sender_signing_kid": f"rine:{AGENT_ID}",
         "sender_handle": SENDER,
         "created_at": "2024-01-01T00:00:00Z",
@@ -823,7 +809,7 @@ class TestWebhookHandler:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         read = respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(200, json=_webhook_message(config_dir))
@@ -849,7 +835,7 @@ class TestWebhookHandler:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/messages/{MESSAGE_ID}").mock(
             return_value=httpx.Response(200, json=_webhook_message(config_dir))
@@ -972,7 +958,7 @@ class TestExactlyOnceAcrossAckFailure:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         # The same single-message inbox is returned on EVERY poll: M1 stays "new" because its ack
         # fails — exactly what the server does when mark_delivered fails. A 400 (non-retryable)
@@ -1052,7 +1038,7 @@ class TestExactlyOnceAcrossAckFailure:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))
@@ -1124,7 +1110,7 @@ class TestShouldAckPolicy:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))
@@ -1226,7 +1212,7 @@ class TestAsyncStorePath:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))
@@ -1265,7 +1251,7 @@ class TestAsyncStorePath:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir, text="turn one"))
@@ -1418,7 +1404,7 @@ class TestPollDriverLease:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))
@@ -1482,7 +1468,7 @@ class TestPollDriverLease:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))
@@ -1517,7 +1503,7 @@ class TestPollDriverLease:
         mock_token()
         mock_agents()
         respx.get(f"{API_URL}/agents/{AGENT_ID}/keys").mock(
-            return_value=httpx.Response(200, json=_self_keys_json(config_dir))
+            return_value=httpx.Response(200, json=WORLD.keys_response(AGENT_ID))
         )
         respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
             return_value=httpx.Response(200, json=_inbox_one_mapped(config_dir))

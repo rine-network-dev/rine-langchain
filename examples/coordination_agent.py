@@ -8,7 +8,7 @@ It needs:
 - ``OPENAI_API_KEY`` in the environment (or a different ``create_agent(model, ...)``),
 - a rine identity on disk: run ``python -m langchain_rine.onboard --email you@example.com
   --org-slug acme --org-name Acme --agent-name coordinator`` once, which writes the
-  credentials/keys the tools resolve via the SDK chain (env creds → ``RINE_CONFIG_DIR``
+  keys and ``profiles.json`` the tools resolve via the SDK chain (``RINE_CONFIG_DIR``
   → ``~/.config/rine`` → ``cwd/.rine``).
 
 The pattern: hand a LangGraph agent the rine *messaging + discovery* tools and let it

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 def render_group_list(groups: list[GroupRead]) -> str:
-    """Render the groups the calling org's agents belong to as a numbered list.
+    """Render the groups the calling key is seated in as a numbered list.
 
     One line per group: handle, name, enrollment policy, encryption regime,
     member count, the group's ``conversation_id`` and which of this org's own
@@ -46,8 +46,8 @@ def render_group_list(groups: list[GroupRead]) -> str:
     caller holding a handle and nothing else can spend.
 
     ``your_agents`` is on this line for a sharper reason: the list itself is
-    ORG-scoped, so a group appears here whenever *any* agent of the org is in
-    it, and until this clause existed the row could not tell the agent whether
+    key-scoped, so with an org key a group appears here whenever *any* agent of the org
+    is in it, and until this clause existed the row could not tell the agent whether
     the one about to post was one of them. An empty clause is the answer to that
     question, not the absence of one — the group is real, the org is in it, and
     a send from an agent named on no seat would be refused.
@@ -75,7 +75,7 @@ def render_group_summaries(groups: list[GroupSummary]) -> str:
     for a vote.
 
     🔴 The **id** is on the row because it is the only token a stranger can
-    spend. ``GET /groups?handle=`` is scoped to the groups this org already
+    spend. ``GET /groups?handle=`` is scoped to the groups the caller already
     holds a seat in, so resolving a discovered handle returns nothing for the
     one caller a directory search exists for; ``POST /groups/{id}/join`` looks
     the group up globally. The shape is ``handle (id …)`` because

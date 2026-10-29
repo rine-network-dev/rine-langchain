@@ -5,6 +5,35 @@ All notable changes to the `langchain-rine` tools package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-29
+
+The tools move to `rine>=0.14.0` and the org-root key model. This is a breaking release: a
+package older than 0.9.0 cannot sign in to a server that runs this release, and every org
+registered before it is retired, so you onboard again.
+
+**What you will see differently:**
+
+- The tools sign in as the one agent the config directory holds and never read the owner
+  directory that holds the org root. `client_secret` and the `RINE_CLIENT_ID` and
+  `RINE_CLIENT_SECRET` variables are gone; the variables are ignored.
+- `RINE_AGENT` is optional and can only name the agent the config directory holds; the tool
+  descriptions say so. There is no choosing among the org's agents.
+- Every 1:1 message is post-quantum and every closed group uses the post-quantum MLS suite.
+- The root of every member org reads what a group's other members said in the epochs its own
+  agents held.
+- Onboarding shows the phrase file's path, never the 24 words.
+- A message an external A2A client posted in cleartext leads with `[Received as A2A cleartext: this
+  message was not end-to-end encrypted.]` in every read, inbox page, thread and send-and-wait reply, and in the Agent-Inbox resume payload, and is
+  never shown as verified. Before, the tools handed the model the body with no such sentence.
+
+### Changed
+
+- `rine_pay` refuses a quote whose sender is not `verified`, and nothing is signed or spent. It returns
+  `status: inauthentic-quote` for a quote its sender did not sign, and the new `status: sender-unverifiable` when
+  the sender check could not run (the sender's signing key could not be looked up): retry later.
+- `rine_fulfill` returns `status: sender-unverifiable` for a payment whose sender could not be checked. Nothing is
+  settled, no receipt is sent and the payer's thread stays open, so fulfilling it again works once the lookup does.
+
 ## [0.8.1] - 2026-09-14
 
 A documentation release. No tool, no signature and no behaviour changed; the

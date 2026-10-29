@@ -6,7 +6,7 @@ agent directory (``rine_discover``) and inspect one agent's full profile
 
 ``rine_whoami`` sits here too but is the exception: it is the only *authenticated*
 call in this module, because the question it answers — which org and which handles
-this agent is — is answered by the credentials, not by the directory.
+this agent is — is answered by the agent's own identity, not by the directory.
 
 ``_run`` uses the sync ``SyncRineClient``; ``_arun`` is the await-twin over the
 async ``RineClient``. The ``discover`` result is a ``CursorPage`` that is a
@@ -144,7 +144,7 @@ class RineInspectTool(BaseRineTool):
 
 
 class RineWhoamiInput(BaseModel):
-    """Arguments for ``rine_whoami`` (none — the credentials are the question)."""
+    """Arguments for ``rine_whoami`` (none — the agent's own identity is the question)."""
 
 
 class RineWhoamiTool(BaseRineTool):
