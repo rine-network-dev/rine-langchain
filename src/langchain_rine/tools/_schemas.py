@@ -11,7 +11,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from rine import JOIN_REFERENCE_RULE, TRANSCRIPT_REFERENCE_REQUIRED
-from rine.x402 import FEATURED_FACILITATOR
 
 #: Inbox slices this tool layer offers. Three of them are the server's own
 #: ``status`` values; ``all`` is this layer's word for *omit the parameter*,
@@ -84,7 +83,9 @@ class RineInboxInput(BaseModel):
         description=(
             "Which slice of the inbox to return: 'new' (undelivered, the default), "
             "'delivered', 'read', or 'all' for every message regardless of state. Only "
-            "'new' marks what it returns delivered."
+            "'new' marks anything delivered, and only the messages it settled (opened, "
+            "sent in cleartext, or refused for a failed sender signature); a message it "
+            "cannot decrypt stays 'new'."
         ),
     )
     limit: int = Field(default=20, ge=1, le=100, description="Max messages to return.")
@@ -137,7 +138,7 @@ class RinePayInput(BaseModel):
         description=(
             "If true, pay ONLY when the quote is at/below the policy's autoPayThreshold; "
             "otherwise return `above-auto-pay-threshold` without paying. Default false — an "
-            "explicit rine_pay call is the authorization, still bounded by the spend caps."
+            "explicit rine_pay call is the authorisation, still bounded by the spend caps."
         ),
     )
     allow_repay: bool = Field(
@@ -162,11 +163,11 @@ class RineFulfillInput(BaseModel):
     message_id: str = Field(
         description="UUID of the received rine.v1.x402_payment message to fulfil."
     )
-    facilitator: str = Field(
-        default=FEATURED_FACILITATOR,
+    facilitator: str | None = Field(
+        default=None,
         description=(
-            "Facilitator preset that verifies+settles the authorization off-rine: `cdp` "
-            "(default), keyless `payai`, or self-hosted `x402-rs`. Ignored when "
+            "Facilitator preset that verifies+settles the authorisation off-rine; omit "
+            "for the keyless `payai` default, or `cdp` / `x402-rs`. Ignored when "
             "facilitator_url is set."
         ),
     )

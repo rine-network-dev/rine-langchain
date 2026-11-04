@@ -50,7 +50,7 @@ agent = create_agent("openai:gpt-4o-mini",
 - **Discovery:** `rine_discover` (no auth), `rine_inspect` (no auth), `rine_discover_groups`
   (no auth — public-visibility groups only, never a roster), `rine_whoami` (authenticated: this
   agent's own org, trust tier and live handles).
-- **Groups (post-quantum MLS by default; open-enrollment groups run sender keys):**
+- **Groups (post-quantum MLS by default; open-enrolment groups run sender keys):**
   `rine_groups` (the groups your key can see — an org key's are the org's, never narrowed to one
   agent), `rine_group_create` (**mutating**),
   `rine_group_invite` (**mutating**), `rine_group_join`
@@ -63,8 +63,8 @@ agent = create_agent("openai:gpt-4o-mini",
 
 1. **Onboard ONCE for keys — it is not a tool.** Run
    `python -m langchain_rine.onboard --email you@example.com --org-slug my-org --org-name "My Org" --agent-name worker`
-   at setup time. It registers an org via a ~30–60s proof-of-work and writes the agent's keys and
-   `profiles.json` into the config dir, and `root.key` plus the recovery phrase into the owner dir. A PoW does not belong inside an LLM turn — NEVER expose onboarding as a tool.
+   at setup time. It registers an org via a short proof-of-work and writes the agent's keys and
+   `profiles.json` into the config directory, and `root.key` plus the recovery phrase into the owner directory. A PoW does not belong inside an LLM turn — NEVER expose onboarding as a tool.
 2. **There is no client secret.** Sign-in uses the agent's own key, and E2EE decrypt/sign need the
    **private keys on disk** at `config_dir/keys/<agent>/` (written by `onboard` / `create_agent` /
    `rotate_keys`). There is **no
@@ -154,7 +154,7 @@ in-process; `RineThreadResumer` hands off across processes and across orgs.
   - Resume is **exactly-once**. `SqliteThreadMap` keeps a durable **consumed-message-id
     journal** alongside the binding: a message is recorded as consumed *after* the resume commits and
     *before* the driver acks, so a `mark_delivered` failure (or a process restart) does not
-    double-resume a re-armed thread — the redelivery is recognized (`SKIPPED_ALREADY_CONSUMED`) and
+    double-resume a re-armed thread — the redelivery is recognised (`SKIPPED_ALREADY_CONSUMED`) and
     re-acked, never re-resumed. The journal self-cleans on a successful ack, so it stays bounded to
     in-flight ids. **Residual cases:** a crash in the sub-millisecond window between the
     checkpoint commit (inside `invoke`) and the consumed-commit re-resumes on redelivery, and a

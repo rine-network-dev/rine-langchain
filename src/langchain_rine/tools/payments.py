@@ -76,7 +76,7 @@ def _auto_pay_gate(config_dir: str, agent_id: str, pr: dict[str, object]) -> str
         threshold = policy.auto_pay_threshold if policy else None
         return (
             f"status: above-auto-pay-threshold — quote exceeds autoPayThreshold "
-            f"({threshold}); call without auto_pay to authorize explicitly."
+            f"({threshold}); call without auto_pay to authorise explicitly."
         )
     return None
 
@@ -137,7 +137,7 @@ class RinePayTool(BaseRineTool):
     name: str = "rine_pay"
     description: str = (
         "Pay a received x402 payment request (rine.v1.x402_payment_required) in-thread. "
-        "MUTATING: signs a stablecoin authorization with the agent's wallet under its "
+        "MUTATING: signs a stablecoin authorisation with the agent's wallet under its "
         "deny-by-default spend policy and sends it back in the same conversation. The "
         "spend is reserved as the last act before the send (permanent debit; no refund). "
         "Does NOT wait for settlement — the receipt arrives later as an ordinary inbox "

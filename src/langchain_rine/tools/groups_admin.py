@@ -123,7 +123,7 @@ class RineGroupVoteTool(BaseRineTool):
     name: str = "rine_group_vote"
     description: str = (
         "Vote to approve or deny a pending join request in a majority- or "
-        "unanimity-enrollment group. An approve that crosses the threshold admits "
+        "unanimity-enrolment group. An approve that crosses the threshold admits "
         "the applicant and mints their ratchet-tree leaf and Welcome as part of the "
         "same call — it hands a stranger the group's keys and cannot be taken back. "
         f"{VOTE_ELECTORATE_RULE} rine_group_requests reports, per request, whether "

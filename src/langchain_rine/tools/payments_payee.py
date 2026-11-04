@@ -82,7 +82,7 @@ class RineFulfillTool(BaseRineTool):
     name: str = "rine_fulfill"
     description: str = (
         "Fulfil a received x402 payment (rine.v1.x402_payment) as the payee. Verifies the "
-        "signed authorization and settles it on-chain through your configured facilitator "
+        "signed authorisation and settles it on-chain through your configured facilitator "
         "(verify/settle are external HTTP, never a rine route), then sends the settlement "
         "receipt back in-thread. A failed verification is a business outcome — a failure "
         "receipt is threaded so the payer reaches a terminal state, not an error. Returns a "
@@ -94,7 +94,9 @@ class RineFulfillTool(BaseRineTool):
     )
     args_schema: type[BaseModel] = RineFulfillInput
 
-    def _facilitator(self, facilitator: str, facilitator_url: str | None) -> FacilitatorClient:
+    def _facilitator(
+        self, facilitator: str | None, facilitator_url: str | None
+    ) -> FacilitatorClient:
         return FacilitatorClient(
             facilitator,
             base_url=facilitator_url,
@@ -104,7 +106,7 @@ class RineFulfillTool(BaseRineTool):
     def _run(
         self,
         message_id: str,
-        facilitator: str = "cdp",
+        facilitator: str | None = None,
         facilitator_url: str | None = None,
         add_marker: bool = True,
         run_manager: CallbackManagerForToolRun | None = None,
@@ -129,7 +131,7 @@ class RineFulfillTool(BaseRineTool):
     async def _arun(
         self,
         message_id: str,
-        facilitator: str = "cdp",
+        facilitator: str | None = None,
         facilitator_url: str | None = None,
         add_marker: bool = True,
         run_manager: AsyncCallbackManagerForToolRun | None = None,

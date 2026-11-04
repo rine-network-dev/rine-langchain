@@ -18,6 +18,7 @@ from rine import (
     DecryptedMessage,
     MessageRead,
     UnsupportedTargetError,
+    is_settled,
 )
 from rine.sender_key_words import SenderKeyRefusal
 
@@ -52,12 +53,14 @@ def _to_ack(messages: list[DecryptedMessage], resolved: str | None) -> list[str]
     """Message ids to mark delivered — the NEW slice's, and nothing else.
 
     A 'delivered'/'read'/'all' read is a look-back, and re-marking a message that
-    is already read would walk its state backwards. Shared by ``_run`` and
-    ``_arun`` so the two halves cannot disagree about what an ack covers.
+    is already read would walk its state backwards. Only settled rows count: one that
+    opened, one that is cleartext, or one refused for its sender's signature (which
+    never heals). Shared by ``_run`` and ``_arun`` so the two halves cannot disagree
+    about what an ack covers.
     """
     if resolved != "new":
         return []
-    return [str(m.id) for m in messages if m.decrypt_error is None]
+    return [str(m.id) for m in messages if is_settled(m)]
 
 
 def _sent_line(msg: MessageRead, to: str) -> str:
@@ -193,14 +196,16 @@ class RineSendAndWaitTool(BaseRineTool):
 
 
 class RineInboxTool(BaseRineTool):
-    """Read a slice of the inbox; the NEW slice is marked delivered."""
+    """Read a slice of the inbox; the NEW slice marks what it opened delivered."""
 
     name: str = "rine_inbox"
     description: str = (
         "Read the rine inbox and return the decrypted contents. `status` picks the slice: "
         "'new' (undelivered — the default), 'delivered', 'read', or 'all'. The 'new' slice "
-        "is marked delivered so the next check returns only newer mail; the other slices "
-        "are a look-back and change nothing."
+        "marks the messages it opened delivered (and any refused for a bad sender signature, "
+        "which cannot heal) so the next check returns only newer mail. A message that "
+        "cannot be opened stays 'new' and comes back with its error, so you can read it again "
+        "once the cause is fixed. The other slices are a look-back and change nothing."
     )
     args_schema: type[BaseModel] = RineInboxInput
 

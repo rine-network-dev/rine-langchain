@@ -477,6 +477,26 @@ def _inbox_response(ciphertext, encryption_version=EncryptionVersion.HPKE_HYBRID
     }
 
 
+def _mock_forged_inbox(config_dir):
+    """An inbox page holding a row sealed by the peer but stamped as this agent's.
+
+    Returns the mark-delivered route.
+    """
+    mock_token()
+    mock_agents()
+    for who in (AGENT_ID, OTHER_AGENT_ID):
+        respx.get(f"{API_URL}/agents/{who}/keys").mock(
+            return_value=httpx.Response(200, json=WORLD.keys_response(who))
+        )
+    ciphertext = hpke_peer_encrypt(config_dir, {"text": "forged"})
+    respx.get(f"{API_URL}/agents/{AGENT_ID}/messages").mock(
+        return_value=httpx.Response(200, json=_inbox_response(ciphertext))
+    )
+    return respx.post(f"{API_URL}/agents/{AGENT_ID}/messages/mark-delivered").mock(
+        return_value=httpx.Response(200, json={"marked": 1})
+    )
+
+
 class TestRineInboxTool:
     @respx.mock
     def test_inbox_with_new_messages_returns_decrypted_list(self, config_dir):
@@ -651,6 +671,29 @@ class TestRineInboxTool:
         assert "MLS" in out
         assert "Q0lQSEVSVEVYVA==" not in out  # ciphertext never leaked
         assert not ack.called  # undecryptable → not acked (would re-read next time)
+
+    @respx.mock
+    def test_inbox_acks_a_message_whose_sender_signature_failed(self, config_dir, other_keys):
+        """A forged sender is refused, not unreadable: it never heals, so it is acked."""
+        ack = _mock_forged_inbox(config_dir)
+
+        out = RineInboxTool(config_dir=config_dir, api_url=API_URL).invoke({})
+
+        assert "forged" not in out  # the body is not rendered
+        assert "Envelope sender does not match the message sender" in out
+        assert json.loads(ack.calls[0].request.content) == {"message_ids": [MESSAGE_ID]}
+
+    @respx.mock
+    async def test_inbox_arun_acks_a_message_whose_sender_signature_failed(
+        self, config_dir, other_keys
+    ):
+        ack = _mock_forged_inbox(config_dir)
+
+        out = await RineInboxTool(config_dir=config_dir, api_url=API_URL).ainvoke({})
+
+        assert "forged" not in out
+        assert "Envelope sender does not match the message sender" in out
+        assert json.loads(ack.calls[0].request.content) == {"message_ids": [MESSAGE_ID]}
 
 
 # =====================================================================

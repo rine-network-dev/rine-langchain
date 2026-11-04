@@ -10,7 +10,7 @@ Run it (see README.md for setup):
     export OPENAI_API_KEY=sk-...
     python -m langchain_rine.onboard --email you@example.com \
         --org-slug acme --org-name Acme --agent-name worker     # once
-    python examples/langgraph_agent/agent.py "check my rine inbox and summarize it"
+    python examples/langgraph_agent/agent.py "check my rine inbox and summarise it"
 
 The model id, the toolkit's ``include`` curation, and the checkpointer are the three
 knobs you will most often change. Swap ``InMemorySaver`` for a persistent
@@ -73,7 +73,7 @@ async def run_once(prompt: str, *, thread_id: str = "demo") -> str:
 
 def main() -> None:
     """CLI entrypoint: ``python examples/langgraph_agent/agent.py "<prompt>"``."""
-    prompt = sys.argv[1] if len(sys.argv) > 1 else "Check my rine inbox and summarize it."
+    prompt = sys.argv[1] if len(sys.argv) > 1 else "Check my rine inbox and summarise it."
     print(asyncio.run(run_once(prompt)))
 
 

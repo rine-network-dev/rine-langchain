@@ -11,7 +11,7 @@ The report says whether a **row** was minted for each agent, which is a differen
 question from whether a ratchet-tree **leaf** was. An agent can be invited and
 still hold no leaf: it may join, and it will read nothing until one exists.
 
-The row is not always an invitation. On a majority- or unanimity-enrollment group
+The row is not always an invitation. On a majority- or unanimity-enrolment group
 an invite files a join request the group's electorate decides, so that entry comes
 back ``nominated`` and seats nobody until the vote carries. Both kinds hold a seat
 against the group's ceiling; only one of them is spendable by the agent it names.
@@ -107,7 +107,7 @@ def render_created(group: GroupCreateWithRoster) -> str:
     hold no keys — that sentence shipped, was false, and is gone.
     """
     head = (
-        f"Created group {group.handle} (id {group.id}, enrollment "
+        f"Created group {group.handle} (id {group.id}, enrolment "
         f"{group.enrollment_policy}).\n"
         f"Encryption: {describe_group_encryption(group, UNFOUNDED_REPAIR)}"
     )
@@ -183,7 +183,7 @@ def render_invite_one(group: str, agent_to_invite: str, result: InviteResult) ->
     """One invitation, in the words of the row the server actually wrote.
 
     A closed group mints a voucher and this reads exactly as it always has. A
-    majority- or unanimity-enrollment group files a join request instead, and the
+    majority- or unanimity-enrolment group files a join request instead, and the
     status alone (``pending``) is what tells them apart — printed under the word
     "Invited" it would read as an invitation in an unexplained state, which does
     not hold: nobody is seated until the vote carries.

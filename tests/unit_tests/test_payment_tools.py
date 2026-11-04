@@ -30,6 +30,7 @@ from rine.x402 import PaymentPolicy, X402Error, X402ErrorCode, read_daily_spent,
 from rine.x402.types import X402_QUOTE_REF_KEY
 
 from langchain_rine import RineFulfillTool, RinePayTool
+from langchain_rine.tools._schemas import RineFulfillInput
 from langchain_rine.tools.payments import _status_for_error
 
 from ..conftest import (
@@ -592,6 +593,46 @@ class TestRineFulfill:
 
         assert not verify.called
         assert "Cannot fulfil" in out
+
+    @respx.mock
+    def test_fulfill_when_api_key_without_facilitator_refuses_before_reading(
+        self, config_dir, monkeypatch
+    ):
+        """A key with only the implicit default is refused, not sent to the keyless preset."""
+        monkeypatch.setenv("RINE_X402_FACILITATOR_API_KEY", "cdp-secret")
+        mock_token()
+        mock_agents()
+        read = respx.get(f"{API_URL}/messages/{MESSAGE_ID}")
+        payai = respx.route(host="facilitator.payai.network")
+
+        out = _fulfill_tool(config_dir).invoke({"message_id": MESSAGE_ID})
+
+        assert "api_key" in out
+        assert not read.called and not payai.called
+
+    @respx.mock
+    def test_fulfill_run_when_facilitator_omitted_uses_sdk_default(self, config_dir, monkeypatch):
+        """A direct _run (no schema default filled in) takes the keyless SDK default."""
+        monkeypatch.setenv("RINE_X402_FACILITATOR_API_KEY", "cdp-secret")
+        mock_token()
+        mock_agents()
+
+        assert "api_key" in _fulfill_tool(config_dir)._run(message_id=MESSAGE_ID)
+
+    @respx.mock
+    async def test_fulfill_arun_when_facilitator_omitted_uses_sdk_default(
+        self, config_dir, monkeypatch
+    ):
+        """A direct _arun takes the keyless SDK default too."""
+        monkeypatch.setenv("RINE_X402_FACILITATOR_API_KEY", "cdp-secret")
+        mock_token()
+        mock_agents()
+
+        assert "api_key" in await _fulfill_tool(config_dir)._arun(message_id=MESSAGE_ID)
+
+    def test_fulfill_input_when_facilitator_omitted_defaults_to_none(self):
+        """The model-facing schema restates no preset: an omitted facilitator is None."""
+        assert RineFulfillInput(message_id=MESSAGE_ID).facilitator is None
 
     @respx.mock
     async def test_fulfill_arun_matches_run(self, config_dir, other_keys):

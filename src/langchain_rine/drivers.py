@@ -22,7 +22,7 @@ import stays side-effect-free.
 
 **Exactly-once:** the resumer records each resumed message in a durable consumed journal
 *before* the ack is attempted, so an ack failure no longer double-resumes — a redelivery is
-recognized as ``SKIPPED_ALREADY_CONSUMED`` and re-acked. Run **one PollDriver per inbox** (the
+recognised as ``SKIPPED_ALREADY_CONSUMED`` and re-acked. Run **one PollDriver per inbox** (the
 optional lease enforces it); webhook-vs-poll coordination stays documented, not enforced.
 """
 
@@ -153,7 +153,7 @@ class PollDriver:
         """Best-effort mark-delivered; return the acked messages (empty on failure or nothing).
 
         A successful ack returns ``to_ack`` so the caller can ``confirm_delivered`` them; a failure
-        is logged and returns ``[]`` (the journal entry is kept so a redelivery is recognized).
+        is logged and returns ``[]`` (the journal entry is kept so a redelivery is recognised).
         """
         if not to_ack:
             return []
@@ -256,9 +256,10 @@ def make_webhook_handler(
 
     def handle(message_id: str) -> ResumeResult:
         client = _client()
-        message = client.read(
-            message_id, agent=agent
-        )  # authenticated + E2EE; never trust the POST
+        # Authenticated + E2EE; never trust the POST. Peeked, because this handler marks the
+        # row itself, and only when the resumer says so: a plain read would also mark a
+        # message the resumer then skips (no paused graph registered for it).
+        message = client.read(message_id, agent=agent, peek=True)
         result = resumer.handle_inbound(message)
         if result.should_ack:
             try:

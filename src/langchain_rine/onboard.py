@@ -1,9 +1,9 @@
 """Setup-time onboarding helper — ``python -m langchain_rine.onboard``.
 
 Runs the **real two-step** flow: ``onboard()`` registers an org
-via a ~30-60s proof-of-work, then a separate ``create_agent()`` mints the agent and
-prints its handle. This is deliberately **not** a ``BaseTool`` — a 30-60s PoW does
-not belong inside an LLM tool call.
+via a short proof-of-work, then a separate ``create_agent()`` mints the agent and
+prints its handle. This is deliberately **not** a ``BaseTool`` — the registration
+proof-of-work takes a while and does not belong inside an LLM tool call.
 
 Config-dir / api-url resolution reuses the SDK's own helpers (no reinvented chain).
 """
@@ -46,7 +46,8 @@ def run_onboard(
         org_name: Human-readable org name.
         agent_name: Name for the agent to create.
         api_url: API base URL (defaults to the SDK resolution).
-        config_dir: Runtime config dir for the agent's keys and profile (defaults to SDK chain).
+        config_dir: Runtime config directory for the agent's keys and profile (defaults to
+            the SDK chain).
 
     Returns:
         The created agent's handle.
@@ -71,8 +72,8 @@ def run_onboard(
     with SyncRineClient(config_dir=resolved_dir, api_url=resolved_url) as client:
         agent = client.create_agent(agent_name)
 
-    print(f"\nAgent created: {agent.handle}")
-    print(f"Config dir:    {resolved_dir}")
+    print(f"\nAgent created:    {agent.handle}")
+    print(f"Config directory: {resolved_dir}")
     # Derived from the signing key just written to this config dir, never from
     # the string the server returned with the agent.
     for line in verification_words_lines(
@@ -100,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-name", required=True, help="Name for the agent to create.")
     parser.add_argument("--api-url", default=None, help="API base URL (default: SDK resolution).")
     parser.add_argument(
-        "--config-dir", default=None, help="Config dir (default: SDK resolution chain)."
+        "--config-dir", default=None, help="Config directory (default: SDK resolution chain)."
     )
     args = parser.parse_args(argv)
 

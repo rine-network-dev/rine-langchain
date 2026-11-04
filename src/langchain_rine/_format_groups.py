@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 def render_group_list(groups: list[GroupRead]) -> str:
     """Render the groups the calling key is seated in as a numbered list.
 
-    One line per group: handle, name, enrollment policy, encryption regime,
+    One line per group: handle, name, enrolment policy, encryption regime,
     member count, the group's ``conversation_id`` and which of this org's own
     agents are seated in it — enough for the model to pick a handle and hand it
     to ``rine_group_inspect``/``rine_send``/``rine_thread`` without a second
@@ -69,7 +69,7 @@ def render_group_summaries(groups: list[GroupSummary]) -> str:
 
     A directory hit is not a ``GroupRead``: the search returns only what a
     stranger may see, so there is no encryption regime and no roster to render
-    here — inspecting either of those needs membership. The enrollment policy
+    here — inspecting either of those needs membership. The enrolment policy
     IS on a directory row, and it is the one field a stranger decides on: it
     separates a group this agent can self-join from one that will make it wait
     for a vote.

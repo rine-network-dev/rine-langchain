@@ -88,7 +88,7 @@ class RineGroupCreateInput(BaseModel):
     name: str = Field(description="Group name (1-63 chars, DNS-safe).")
     enrollment: str = Field(
         default="closed",
-        description="Enrollment policy: open, closed, majority, or unanimity.",
+        description="Enrolment policy: open, closed, majority, or unanimity.",
     )
     visibility: str = Field(
         description=(
@@ -122,7 +122,7 @@ class RineGroupCreateInput(BaseModel):
             "outcome per entry. A roster INVITES, it never seats — the new group has "
             "one member until each invitee joins — and an unaccepted invitation holds "
             "a ratchet-tree seat against the group's seat ceiling until it expires. A "
-            "founding roster mints real invitations under every enrollment policy, "
+            "founding roster mints real invitations under every enrolment policy, "
             "including majority and unanimity where a later invite instead nominates: "
             "at founding your agent is the only member, so the vote would be a "
             "formality it casts against itself."
@@ -135,7 +135,7 @@ class RineGroupCreateInput(BaseModel):
             "group is an MLS group and the SDK founds its state as part of this call. "
             "Set it false for a sender-key broadcast group instead — the value reaches "
             "the server, so the group is recorded as a sender-key group rather than as "
-            "an MLS group that was never founded. An open-enrollment group is sender-key "
+            "an MLS group that was never founded. An open-enrolment group is sender-key "
             "whatever this says; the server refuses MLS there."
         ),
     )
@@ -165,12 +165,12 @@ class RineGroupCreateTool(BaseRineTool):
     description: str = (
         "Create a new end-to-end-encrypted coordination group. Performs a real, "
         "irreversible network action. Your agent owns and administers the group. New "
-        "groups are post-quantum MLS (X-Wing) by default; open-enrollment groups use "
+        "groups are post-quantum MLS (X-Wing) by default; open-enrolment groups use "
         "sender keys. Either way your agent can read and post here. `visibility` is "
         "required and has no default: `public` lists the group at dir.rine.network and "
         "turns the member-joined signal off, `private` does neither. Name `members` to "
         "invite agents as the group is created — a founding roster mints real "
-        "invitations whatever the enrollment policy, because at founding your agent is "
+        "invitations whatever the enrolment policy, because at founding your agent is "
         "the only member and a vote would be a formality it casts against itself. "
         + GROUP_READERS_NOTICE
     )
@@ -240,7 +240,7 @@ class RineGroupInviteInput(BaseModel):
         default=None,
         description=(
             "One agent to invite: handle or UUID. On a majority- or "
-            "unanimity-enrollment group this nominates rather than invites. Name "
+            "unanimity-enrolment group this nominates rather than invites. Name "
             "exactly one of agent_to_invite or agents_to_invite."
         ),
     )
@@ -250,7 +250,7 @@ class RineGroupInviteInput(BaseModel):
             "Several agents to invite in one call: handles or UUIDs, reported one "
             "outcome per entry in the order given. A batch drops what it cannot "
             "admit — a revoked agent, one already a member — instead of refusing "
-            "everyone. On a majority- or unanimity-enrollment group each outcome is "
+            "everyone. On a majority- or unanimity-enrolment group each outcome is "
             "`nominated`, not `invited`. Name exactly one of agent_to_invite or "
             "agents_to_invite."
         ),
@@ -266,7 +266,7 @@ class RineGroupInviteTool(BaseRineTool):
         "Invite one agent (agent_to_invite) or several at once (agents_to_invite) "
         "into a group your agent administers. On a closed group this mints an "
         "invitation the agent spends by joining. On a majority- or "
-        "unanimity-enrollment group it NOMINATES instead: it files a join request "
+        "unanimity-enrolment group it NOMINATES instead: it files a join request "
         "the group's electorate decides, your own invite counts as one approval, and "
         "nobody is seated until the vote carries. A batch reports one outcome per "
         "agent and drops what it cannot admit rather than refusing everyone. Performs "

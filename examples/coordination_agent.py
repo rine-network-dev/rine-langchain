@@ -46,7 +46,7 @@ async def main() -> None:
         "rine_reply to answer an agent in-thread; and use rine_inbox to read new "
         "mail. Every send is a real, irreversible, end-to-end-encrypted network message — "
         "address peers by their handle, for example kofi@acme.rine.network. "
-        "Summarize what each peer told you."
+        "Summarise what each peer told you."
     )
 
     # ``create_agent`` (LangChain 1.0) builds a LangGraph ReAct-style agent. The model

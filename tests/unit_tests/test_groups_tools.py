@@ -200,7 +200,7 @@ class TestRineGroupCreateTool:
             }
         )
 
-        assert f"{OTHER_AGENT_ID}: this group takes open enrollment" in out
+        assert f"{OTHER_AGENT_ID}: this group takes open enrolment" in out
         assert "may join whenever it likes" in out
         assert "not_applicable" not in out
         assert f"{OTHER_AGENT_ID}: skipped" not in out

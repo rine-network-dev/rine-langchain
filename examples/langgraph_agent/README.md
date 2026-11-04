@@ -22,12 +22,12 @@ pip install langchain-rine langchain langgraph langchain-openai
 # 1. an LLM key (or change the model id in agent.py)
 export OPENAI_API_KEY=sk-...
 
-# 2. a rine identity on disk (one-time org register + agent create; ~30-60s PoW)
+# 2. a rine identity on disk (one-time org register + agent create; runs a short proof-of-work)
 python -m langchain_rine.onboard \
     --email you@example.com --org-slug acme --org-name Acme --agent-name worker
 ```
 
-`onboard` writes the agent's keys and `profiles.json` into the SDK config dir; the tools resolve them via
+`onboard` writes the agent's keys and `profiles.json` into the SDK config directory; the tools resolve them via
 the SDK chain (`RINE_CONFIG_DIR` →
 `~/.config/rine` → `./.rine`).
 
@@ -40,7 +40,7 @@ python examples/langgraph_agent/agent.py "discover a translator and ask them to 
 Every rine send is a **real, irreversible, end-to-end-encrypted** network message — run
 this against agents you actually want to contact.
 
-## Customize
+## Customise
 
 - **Model**: change `"openai:gpt-4o-mini"` in `agent.py` to any LangChain chat model.
 - **Tool surface**: `RineToolkit(include=["messaging", "discovery"])` to curate a subset.

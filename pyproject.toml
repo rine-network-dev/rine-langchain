@@ -12,7 +12,7 @@ authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
 keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
 # Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
 # "langchain-rine"), so the installed metadata (this literal) is the only version string.
-version = "0.9.0"
+version = "0.10.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -32,20 +32,21 @@ dependencies = [
     # so the pin is documented, not active in dev. Signing (rine_pay) needs the SDK's
     # `payments` extra — see the `payments` extra below.
     #
-    # PUBLISHED FLOOR 0.11.0, and unlike every floor before it this one is NOT
-    # documentation-grade — it is a hard import requirement. These tools import names the
-    # SDK first exported in 0.11.0 (`describe_mls_admission`, `own_agents_clause`,
-    # `GroupCreateWithRoster`, `GroupTarget`, `VOTE_ELECTORATE_RULE` among others), so
-    # against 0.10.0 `import langchain_rine` raises ImportError at module scope. Lower
-    # this floor and the package does not fail a call — it fails to load.
+    # PUBLISHED FLOOR 0.14.0, the org-root release: an SDK older than that cannot sign in
+    # to a server that runs it. Separately, these tools import names the SDK exports from
+    # 0.11.0 on (`describe_mls_admission`, `own_agents_clause`, `GroupCreateWithRoster`,
+    # `GroupTarget`, `VOTE_ELECTORATE_RULE` among others), so against an SDK older than
+    # 0.11.0 `import langchain_rine` raises ImportError at module scope.
     #
-    # 0.11.0 also inherits 0.10.0's reason for existing: it is at or above the first rine
-    # whose send path fetches the recipient's signing key fresh instead of reading a
-    # cached copy, so a peer that rotates its key is sent to under the new key on the very
-    # next message rather than up to ten minutes later. A seal is one-shot and reports
-    # nothing back, so a message sealed to a stale key is simply unreadable for its
-    # recipient — nothing in these tools can detect or retry that.
-    "rine>=0.14.0",
+    # The floor is also at or above the first rine whose send path fetches the recipient's
+    # signing key fresh instead of reading a cached copy, so a peer that rotates its key is
+    # sent to under the new key on the very next message. A seal is one-shot and reports
+    # nothing back, so a message sealed to a stale key is unreadable for its recipient and
+    # nothing in these tools can detect or retry that.
+    #
+    # The floor is also the first rine that exports `is_settled`, which the inbox tool imports
+    # to decide which messages it acknowledges; against 0.14.0 the package fails to load.
+    "rine>=0.15.0",
     "langchain-core>=1.0,<2.0",  # exact min verified
     "pydantic>=2.0",
 ]
@@ -58,7 +59,7 @@ Issues = "https://codeberg.org/rine/rine-langchain/issues"
 
 [project.optional-dependencies]
 # v0.2 Tier-3 idle-wake resumer. LangGraph is NOT a core runtime dep — attaching the
-# 21 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
+# 25 tools to any framework must not force langgraph. Importing `langchain_rine.inbound` IS
 # the opt-in; this extra supplies langgraph + the durable sqlite checkpointer the resumer's
 # caller-owned `SqliteSaver` lifecycle needs. (The resumer's own thread-map uses stdlib sqlite3.)
 inbound = [

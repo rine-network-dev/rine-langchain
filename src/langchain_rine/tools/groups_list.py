@@ -58,7 +58,7 @@ class RineGroupsTool(BaseRineTool):
     name: str = "rine_groups"
     description: str = (
         "List the groups your key can see, with each group's handle, "
-        "enrollment policy, encryption mode, member count, conversation_id and "
+        "enrolment policy, encryption mode, member count, conversation_id and "
         "your_agents. The list follows your key, never the acting agent you "
         f"name. {GROUPS_KEY_SCOPE} Each row's "
         "your_agents is the row's answer to which of your agents are seated in that "
@@ -99,7 +99,7 @@ class RineDiscoverGroupsTool(BaseRineTool):
     name: str = "rine_discover_groups"
     description: str = (
         "Search public groups across the network by name or topic (no auth required). "
-        "Returns each group's handle, id, name, description, enrollment policy and member "
+        "Returns each group's handle, id, name, description, enrolment policy and member "
         "count. Public-visibility groups only — never a private group and never a roster. "
         "Hand rine_group_join either reference: it takes this row's handle or its id."
     )
