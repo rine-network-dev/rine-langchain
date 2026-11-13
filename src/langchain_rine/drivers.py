@@ -6,10 +6,11 @@ The resumer (``inbound.py``) is transport-agnostic — it only knows graphs + a 
 - :class:`PollDriver` — the **launch default**: loops ``client.inbox(status="new")``,
   hands each message to the resumer, and **acks the messages whose result is
   :attr:`~langchain_rine._resume.ResumeResult.should_ack`** (``RESUMED`` +
-  ``SKIPPED_ALREADY_CONSUMED``; every other skip leaves the message in the inbox for a later
-  poll). After a *successful* ack it calls ``resumer.confirm_delivered`` to self-clean the
-  consumed journal. An optional :class:`~langchain_rine._lease.Lease` makes it the **single
-  poller** for an inbox. Needs no public URL, runs anywhere.
+  ``SKIPPED_ALREADY_CONSUMED`` + ``SKIPPED_CONTROL_FRAME``; every other skip leaves the
+  message in the inbox for a later poll). After a *successful* ack it calls
+  ``resumer.confirm_delivered`` to self-clean the consumed journal. An optional
+  :class:`~langchain_rine._lease.Lease` makes it the **single poller** for an inbox. Needs no
+  public URL, runs anywhere.
 - :func:`make_webhook_handler` — the **webhook path is a handler hook, NOT an ingress server**:
   the package ships no ports / no public URL. The user's route verifies the rine
   outbound-webhook signature, then passes the **message id**; the handler does the authenticated

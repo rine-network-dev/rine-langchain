@@ -14,9 +14,9 @@ audit fixes — FAILED status, verification gating, terminal-unregister — push
   ``sender-mismatch``) must never wake a graph; an *unverifiable* one
   resumes-but-annotated by default, or is *blocked* when the caller opts into
   ``require_verified``. Both reuse ``_format`` — never the ciphertext.
-- :func:`pre_state_guard` — the **no-I/O** guard chain (decrypt-error → refused
-  signature → no-conversation) shared verbatim by the sync ``_resolve`` and async
-  ``_aresolve`` paths so neither duplicates the guard logic.
+- :func:`pre_state_guard` — the **no-I/O** guard chain (decrypt-error →
+  refused signature → no-conversation) shared verbatim by the sync ``resolve`` and async
+  ``aresolve`` paths in ``_resolve.py`` so neither duplicates the guard logic.
 
 Side-effect-free at import: no network, no client, no langgraph. The
 re-exports in ``inbound.py`` keep ``from langchain_rine.inbound import
@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from rine import is_authenticity_failure
+from rine.control_frames import is_group_invite, is_hidden_from_model
 from rine.sender_key_words import SenderKeyRefusal
 
 from langchain_rine._format import render_message_body
@@ -53,6 +54,7 @@ class ResumeStatus(enum.Enum):
     SKIPPED_NOT_INTERRUPTED = "skipped_not_interrupted"
     SKIPPED_MULTIPLE_INTERRUPTS = "skipped_multiple_interrupts"
     SKIPPED_DECRYPT_ERROR = "skipped_decrypt_error"
+    SKIPPED_CONTROL_FRAME = "skipped_control_frame"
     SKIPPED_UNVERIFIED = "skipped_unverified"
     SKIPPED_ALREADY_CONSUMED = "skipped_already_consumed"
     FAILED = "failed"
@@ -61,9 +63,16 @@ class ResumeStatus(enum.Enum):
 # The statuses whose message the driver must mark-delivered (ack). ``RESUMED`` leaves the
 # inbox because it was handled; ``SKIPPED_ALREADY_CONSUMED`` is a redelivery of a message we
 # already resumed (its journal entry proves it) — re-ack it so it finally leaves the inbox
-# without a second resume. Every other status leaves the message ``new`` for a later
-# sweep.
-_ACK_STATUSES = frozenset({ResumeStatus.RESUMED, ResumeStatus.SKIPPED_ALREADY_CONSUMED})
+# without a second resume; ``SKIPPED_CONTROL_FRAME`` is key material or an invite that arrived
+# on a parked conversation and settled, which no later sweep could turn into an answer. Every
+# other status leaves the message ``new`` for a later sweep.
+_ACK_STATUSES = frozenset(
+    {
+        ResumeStatus.RESUMED,
+        ResumeStatus.SKIPPED_ALREADY_CONSUMED,
+        ResumeStatus.SKIPPED_CONTROL_FRAME,
+    }
+)
 
 
 @dataclass
@@ -72,8 +81,9 @@ class ResumeResult:
 
     ``thread_id`` is the mapped thread (when one was found); ``output`` is the resumed graph's
     return value on a ``RESUMED`` status, else None. The driver acks the
-    :attr:`should_ack` results (``RESUMED`` + ``SKIPPED_ALREADY_CONSUMED``); every other
-    ``SKIPPED_*`` / ``FAILED`` message stays in the rine inbox for a later sweep.
+    :attr:`should_ack` results (``RESUMED`` + ``SKIPPED_ALREADY_CONSUMED`` +
+    ``SKIPPED_CONTROL_FRAME``); every other ``SKIPPED_*`` / ``FAILED`` message stays in the
+    rine inbox for a later sweep.
     """
 
     status: ResumeStatus
@@ -124,6 +134,16 @@ def verification_blocks_resume(
     return require_verified and message.verification_status == "unverifiable"
 
 
+def is_control_frame(message: DecryptedMessage) -> bool:
+    """True for key material and group invites: frames that can never answer a pause.
+
+    The resumer acks one only when it arrives on a conversation it has parked and has settled
+    (opened, or refused for authenticity), so an invite on any other conversation stays in the
+    inbox for ``rine_inbox`` to show and a frame that has not opened stays ``new`` to heal.
+    """
+    return is_hidden_from_model(message.type) or is_group_invite(message.type)
+
+
 def pre_state_guard(
     message: DecryptedMessage, key_fn: KeyFn, *, require_verified: bool = False
 ) -> tuple[ResumeResult, str, str] | tuple[None, str, str]:
@@ -134,7 +154,7 @@ def pre_state_guard(
     no-conversation); when ``early`` is None the caller proceeds to the I/O guards
     (already-consumed, thread lookup) with the derived ``handle`` / ``conversation_id``.
 
-    Factored here so ``_resolve`` and ``_aresolve`` do not duplicate the guard chain — each
+    Factored here so ``resolve`` and ``aresolve`` do not duplicate the guard chain — each
     only adds its own (sync vs awaited) store lookups. No store / network / langgraph
     touch happens here; logging is left to the caller so the message text can name the path.
     """

@@ -5,6 +5,14 @@ All notable changes to the `langchain-rine` tools package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+A held agent is told it is held, not that its sign-in failed.
+
+**What you will see differently:**
+
+- A tool run for an agent that is suspended, whose branch is suspended or whose organisation is frozen returns the server's own sentence, which says why and that queued messages arrive after the lift. Before, it returned `Rine auth failed — onboard ...`, which sent the operator to fix keys that were fine. Needs the `rine` release that carries `PrincipalHeldError`.
+
 ## [0.10.0] - 2026-11-04
 
 **What you will see differently:**

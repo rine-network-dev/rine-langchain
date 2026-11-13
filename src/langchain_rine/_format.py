@@ -15,6 +15,16 @@ from typing import TYPE_CHECKING
 
 from rine.a2a_cleartext import with_a2a_cleartext_notice
 
+# What a model sees of a control frame is the SDK's sentence: this module places it,
+# it does not word it.
+from rine.control_frames import (
+    HIDDEN_CONTROL_FRAME_READ,
+    group_invite_notice,
+    is_group_invite,
+    is_hidden_from_model,
+    without_hidden_frames,
+)
+
 # One definition per language: the SDK owns the predicate, so a group renders the
 # same way on every surface. Every consumer imports it from the SDK — this module
 # is a renderer, not a pass-through.
@@ -69,7 +79,8 @@ UNFOUNDED_REPAIR: UnfoundedGroupRepair = "tool-group-reclaim"
 def _render_thread_line(e: ThreadEntry) -> str:
     """One thread turn as a role-tagged line: ``[sent] you: …`` / ``[received] h: …``."""
     who = "you" if e.direction == "sent" else (e.sender_handle or "unknown")
-    return f"[{e.direction}] {who}: {e.text}"
+    text = group_invite_notice(e.sender_handle) if is_group_invite(e.type) else e.text
+    return f"[{e.direction}] {who}: {text}"
 
 
 def render_thread(entries: list[ThreadEntry]) -> str:
@@ -78,9 +89,10 @@ def render_thread(entries: list[ThreadEntry]) -> str:
     Each turn is a role-tagged line; ``[unavailable]`` text passes through. Mirrors
     the TS connectors' ``renderThread`` so transcripts read identically.
     """
-    if not entries:
+    shown = without_hidden_frames(entries)
+    if not shown:
         return "No messages in this conversation."
-    return "\n".join(_render_thread_line(e) for e in entries)
+    return "\n".join(_render_thread_line(e) for e in shown)
 
 
 def _verified_note(msg: DecryptedMessage) -> str:
@@ -106,7 +118,14 @@ def render_message_body(msg: DecryptedMessage, refusal: SenderKeyRefusal) -> str
     SDK's bounded preview on every later one. ``refusal`` is that render's state
     and is **required** — a default would let a new loop pay the whole ~600-char
     explanation per row and still read green. Every other cause is untouched.
+
+    Control frames never reach a model as text: a key-material frame reads as a fixed
+    "nothing to read" line and an invite as its fixed notice, whatever the payload says.
     """
+    if is_hidden_from_model(msg.type):
+        return HIDDEN_CONTROL_FRAME_READ
+    if is_group_invite(msg.type):
+        return group_invite_notice(msg.sender_handle)
     if msg.decrypt_error:
         return f"[unreadable] {refusal.text_for(msg) or msg.decrypt_error}"
     if msg.plaintext is None:
@@ -174,11 +193,12 @@ def render_inbox(messages: list[DecryptedMessage], *, status: str = "new") -> st
     eight rows with no sender key carry the explanation once, then a marker.
     """
     noun = "" if status == "all" else f"{status} "
-    if not messages:
+    shown = without_hidden_frames(messages)
+    if not shown:
         return f"No {noun}messages."
     refusal = SenderKeyRefusal()
-    lines = [f"{i}. {render_message(m, refusal)}" for i, m in enumerate(messages, start=1)]
-    return f"{len(messages)} {noun}message(s):\n" + "\n".join(lines)
+    lines = [f"{i}. {render_message(m, refusal)}" for i, m in enumerate(shown, start=1)]
+    return f"{len(shown)} {noun}message(s):\n" + "\n".join(lines)
 
 
 def render_agent_summary(a: AgentSummary) -> str:

@@ -272,6 +272,7 @@ matches none of them is an ordinary sender-key group.
 - **`Rine auth failed — onboard ...`** — no `profiles.json` resolved, or the host clock is more than
   30 s off. Point `RINE_CONFIG_DIR` at a config directory, run `python -m langchain_rine.onboard`, or restore
   the org with `rine org recover`.
+- **`This agent is suspended, ...`, `This agent's branch is suspended, ...` or `This organisation is frozen, ...`** — not a sign-in fault: the agent, its branch or its organisation is held, so every tool refuses until it is resumed or unfrozen, and nothing needs re-onboarding. Messages sent to the agent meanwhile wait in its queue.
 - **Authenticated but every message reads `[unreadable]`** — the private keys
   aren't on disk. Onboard (or copy the agent's `config_dir/keys/<agent>/` over) so decrypt/sign can run.
 - **`[no sender key: ask the sender to post to the group again]`** — the short form of a refusal an

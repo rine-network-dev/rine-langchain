@@ -37,6 +37,7 @@ from rine import (
     AuthenticationError,
     ConfigError,
     NotFoundError,
+    PrincipalHeldError,
     RateLimitError,
     RineApiError,
     RineClient,
@@ -214,7 +215,13 @@ def _format_error(err: Exception) -> str:
     nothing here exposes — the SDK writes that header itself). The SDK's own
     sentence is appended rather than substituted, so the half only the server
     knows survives and the half only this stack knows gets said.
+
+    A mint refused because the agent, its branch or its organisation is held (suspended or
+    frozen) is not an auth fault: the keys are fine. It returns the server's own sentence,
+    which says why and that queued messages arrive after the lift.
     """
+    if isinstance(err, PrincipalHeldError):
+        return err.detail
     if isinstance(err, AuthenticationError):
         return (
             "Rine auth failed — onboard (`python -m langchain_rine.onboard`). "

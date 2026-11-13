@@ -55,8 +55,9 @@ def _to_ack(messages: list[DecryptedMessage], resolved: str | None) -> list[str]
     A 'delivered'/'read'/'all' read is a look-back, and re-marking a message that
     is already read would walk its state backwards. Only settled rows count: one that
     opened, one that is cleartext, or one refused for its sender's signature (which
-    never heals). Shared by ``_run`` and ``_arun`` so the two halves cannot disagree
-    about what an ack covers.
+    never heals. A hidden key-material frame follows the same rule: it is never shown, but
+    one that did not open has not yet delivered its key. Shared by ``_run`` and ``_arun`` so the
+    two halves cannot disagree about what an ack covers.
     """
     if resolved != "new":
         return []

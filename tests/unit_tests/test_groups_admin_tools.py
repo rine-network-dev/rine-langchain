@@ -522,3 +522,34 @@ class TestVoteRendering:
         out = self._render(None, status="denied")
 
         assert out.endswith("Request status: `denied`.")
+
+
+class TestAdmissionReportWithARuleRefusal:
+    """An invite report may carry the `org_rule` skip token, or one a newer server adds."""
+
+    @staticmethod
+    def _report(reason: str):
+        from rine.group_admission import GroupAdmissionReport
+
+        return GroupAdmissionReport.model_validate(
+            {
+                "invited": 0,
+                "skipped": 1,
+                "entries": [{"agent_id": OTHER_AGENT_ID, "status": "skipped", "reason": reason}],
+            }
+        )
+
+    def test_render_admission_when_a_rule_refused_the_agent_then_the_clause_names_the_rule(self):
+        from langchain_rine.tools._admission import render_admission
+
+        out = render_admission(self._report("org_rule"))
+
+        assert f"{OTHER_AGENT_ID}: refused by an organisation's group rule" in out
+        assert "not recognised" not in out
+
+    def test_render_admission_when_the_reason_is_unknown_then_it_renders_without_raising(self):
+        from langchain_rine.tools._admission import render_admission
+
+        out = render_admission(self._report("some_future_reason"))
+
+        assert f"{OTHER_AGENT_ID}: reason not recognised by this client: some_future_reason" in out

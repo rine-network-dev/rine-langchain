@@ -14,6 +14,7 @@ import logging
 from typing import Any, TypedDict
 
 import httpx
+import pytest
 import respx
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -45,6 +46,9 @@ SECOND_MESSAGE_ID = "cccccccc-dddd-eeee-ffff-000000000009"
 
 # A wire ciphertext string that must NEVER reach a resume value (the ciphertext-absence guard).
 CIPHERTEXT_MARKER = "ZW5jcnlwdGVkLWNpcGhlcnRleHQtbWFya2Vy"
+
+# Frames that are never conversation: key material and a group invite.
+CONTROL_FRAME_TYPES = ["rine.v1.sender_key_distribution", "rine.v1.group_invite"]
 
 
 # --- a real fake graph: one node that interrupts, echoing the resumed value ----------------
@@ -183,6 +187,7 @@ def _message(
     conversation_id: str = CONVERSATION_ID,
     msg_id: str = MESSAGE_ID,
     verification_status: str = "verified",
+    msg_type: str = "rine.v1.task_response",
 ) -> DecryptedMessage:
     """Build a real ``DecryptedMessage`` (the resumer operates on these, not raw HTTP).
 
@@ -194,7 +199,7 @@ def _message(
         id=msg_id,
         conversation_id=conversation_id,
         from_agent_id=AGENT_ID,
-        type="rine.v1.task_response",
+        type=msg_type,
         encrypted_payload=CIPHERTEXT_MARKER,
         created_at="2024-01-01T00:00:00Z",
         sender_handle=sender_handle,
@@ -345,6 +350,118 @@ class TestResumerGuards:
         state = graph.get_state({"configurable": {"thread_id": THREAD}})
         assert state.next == ("ask",)
         assert CIPHERTEXT_MARKER not in str(state.values)
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    def test_handle_inbound_with_a_control_frame_skips_and_acks_leaving_the_pause(
+        self, frame_type
+    ):
+        """Key material and an invite never answer a pause; they leave the inbox unresumed."""
+        graph = _single_interrupt_graph(InMemorySaver())
+        resumer = RineThreadResumer(graph, InMemoryThreadMap())
+        resumer.register(SENDER, CONVERSATION_ID, THREAD)
+        _start(graph, THREAD)
+
+        result = resumer.handle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_CONTROL_FRAME
+        assert result.should_ack is True
+        state = graph.get_state({"configurable": {"thread_id": THREAD}})
+        assert state.next == ("ask",)
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    async def test_ahandle_inbound_with_a_control_frame_skips_and_acks_leaving_the_pause(
+        self, frame_type
+    ):
+        graph = _single_interrupt_graph(InMemorySaver())
+        resumer = RineThreadResumer(graph, InMemoryThreadMap())
+        resumer.register(SENDER, CONVERSATION_ID, THREAD)
+        _start(graph, THREAD)
+
+        result = await resumer.ahandle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_CONTROL_FRAME
+        assert result.should_ack is True
+        state = graph.get_state({"configurable": {"thread_id": THREAD}})
+        assert state.next == ("ask",)
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    def test_handle_inbound_with_an_unopened_control_frame_on_a_parked_pause_leaves_it_new(
+        self, frame_type
+    ):
+        """A frame that has not opened stays ``new``: only a settled row is acked."""
+        resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
+        resumer.register(SENDER, CONVERSATION_ID, THREAD)
+
+        result = resumer.handle_inbound(
+            _message(msg_type=frame_type, decrypt_error="sender key not yet arrived")
+        )
+
+        assert result.status is ResumeStatus.SKIPPED_DECRYPT_ERROR
+        assert result.should_ack is False
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    async def test_ahandle_inbound_with_an_unopened_control_frame_on_a_parked_pause_leaves_it_new(
+        self, frame_type
+    ):
+        resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
+        resumer.register(SENDER, CONVERSATION_ID, THREAD)
+
+        result = await resumer.ahandle_inbound(
+            _message(msg_type=frame_type, decrypt_error="sender key not yet arrived")
+        )
+
+        assert result.status is ResumeStatus.SKIPPED_DECRYPT_ERROR
+        assert result.should_ack is False
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    def test_handle_inbound_with_a_control_frame_on_an_unparked_conversation_leaves_it_new(
+        self, frame_type
+    ):
+        """An invite on a conversation nothing is parked on stays in the inbox, unacked."""
+        resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
+
+        result = resumer.handle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_NO_THREAD
+        assert result.should_ack is False
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    async def test_ahandle_inbound_with_a_control_frame_on_an_unparked_conversation_leaves_it_new(
+        self, frame_type
+    ):
+        resumer = RineThreadResumer(_single_interrupt_graph(InMemorySaver()), InMemoryThreadMap())
+
+        result = await resumer.ahandle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_NO_THREAD
+        assert result.should_ack is False
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    def test_handle_inbound_with_a_control_frame_and_no_conversation_id_leaves_it_new(
+        self, frame_type
+    ):
+        """A frame with no conversation id cannot be parked, even with an empty key stored."""
+        graph = _single_interrupt_graph(InMemorySaver())
+        resumer = RineThreadResumer(graph, InMemoryThreadMap(), key_fn=lambda m: (SENDER, ""))
+        resumer.register(SENDER, "", THREAD)
+
+        result = resumer.handle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_NO_THREAD
+        assert result.should_ack is False
+
+    @pytest.mark.parametrize("frame_type", CONTROL_FRAME_TYPES)
+    async def test_ahandle_inbound_with_a_control_frame_and_no_conversation_id_leaves_it_new(
+        self, frame_type
+    ):
+        graph = _single_interrupt_graph(InMemorySaver())
+        resumer = RineThreadResumer(graph, InMemoryThreadMap(), key_fn=lambda m: (SENDER, ""))
+        resumer.register(SENDER, "", THREAD)
+
+        result = await resumer.ahandle_inbound(_message(msg_type=frame_type))
+
+        assert result.status is ResumeStatus.SKIPPED_NO_THREAD
+        assert result.should_ack is False
 
     def test_handle_inbound_with_no_conversation_skips_no_conversation(self):
         graph = _single_interrupt_graph(InMemorySaver())
@@ -1074,11 +1191,15 @@ class TestExactlyOnceAcrossAckFailure:
 
 
 class TestShouldAckPolicy:
-    def test_should_ack_true_only_for_resumed_and_already_consumed(self):
-        """The ack policy is status-driven: RESUMED + SKIPPED_ALREADY_CONSUMED ack, else not."""
+    def test_should_ack_true_only_for_resumed_consumed_and_control_frames(self):
+        """The ack policy is status-driven: RESUMED, ALREADY_CONSUMED and CONTROL_FRAME ack."""
         from langchain_rine.inbound import ResumeResult
 
-        ack = {ResumeStatus.RESUMED, ResumeStatus.SKIPPED_ALREADY_CONSUMED}
+        ack = {
+            ResumeStatus.RESUMED,
+            ResumeStatus.SKIPPED_ALREADY_CONSUMED,
+            ResumeStatus.SKIPPED_CONTROL_FRAME,
+        }
         for status in ResumeStatus:
             assert ResumeResult(status).should_ack is (status in ack), status
 

@@ -13,7 +13,7 @@ resume), co-located in one sqlite db file (alongside the LangGraph ``SqliteSaver
   to in-flight ids. The journal stores **only ``message.id``**, never payload.
 
 Two connections share the file: a sync stdlib ``sqlite3`` connection (the sync resume path)
-and a **lazily-imported ``aiosqlite``** connection (the async ``_aresolve`` path). The
+and a **lazily-imported ``aiosqlite``** connection (the async ``aresolve`` path). The
 ``import aiosqlite`` is lazy (inside :meth:`_aconnection`), so a sync-only user never needs
 aiosqlite. ``PRAGMA journal_mode=WAL`` lets the sync conn, the aiosqlite conn, and the
 caller's ``SqliteSaver`` coexist without lock contention. SQL is shared between the two paths
