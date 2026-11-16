@@ -12,7 +12,7 @@ authors = [{ name = "mmmbs", email = "mmmbs@proton.me" }]
 keywords = ["rine", "langchain", "langgraph", "agents", "tools", "e2ee", "messaging", "ai-agents"]
 # Single source of truth: __init__.py reads __version__ from importlib.metadata.version(
 # "langchain-rine"), so the installed metadata (this literal) is the only version string.
-version = "0.10.0"
+version = "0.11.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -46,7 +46,10 @@ dependencies = [
     #
     # The floor is also the first rine that exports `is_settled`, which the inbox tool imports
     # to decide which messages it acknowledges; against 0.14.0 the package fails to load.
-    "rine>=0.15.0",
+    #
+    # 0.16.0 is the first rine that exports `PrincipalHeldError`, which the held-agent
+    # sentence in this release imports.
+    "rine>=0.16.0",
     "langchain-core>=1.0,<2.0",  # exact min verified
     "pydantic>=2.0",
 ]
